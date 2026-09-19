@@ -1,0 +1,523 @@
+from rest_framework import generics
+from django.conf import settings
+from django.db.models import Q
+from django.core.mail import send_mail
+from .models import EmailVerificationCode
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from .serializers import RegisterSerializer, UserSerializer
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.utils import timezone
+from django.contrib.auth.models import User
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from datetime import timedelta
+from .models import (
+    EmailVerificationCode,
+    PasswordResetCode,
+)
+from rest_framework import status
+from .models import EmailVerificationCode
+from .serializers import VerifyEmailSerializer
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from .models import CustomerProfile
+from .serializers import (
+    RegisterSerializer,
+    UserSerializer,
+    CustomerProfileSerializer,
+    AdminCustomerSerializer,
+    ResendVerificationSerializer,
+    ForgotPasswordSerializer, 
+    ResetPasswordSerializer,
+)
+
+
+class RegisterView(generics.CreateAPIView):
+    serializer_class = RegisterSerializer
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+
+        verification, created = EmailVerificationCode.objects.get_or_create(
+            user=user
+        )
+
+        verification.generate_code()
+
+        send_mail(
+            subject="Verify your email",
+           message=(
+    f"Hello {user.first_name or user.username},\n\n"
+    "Welcome to our store! 🎉\n\n"
+    "Thank you for creating an account with us.\n\n"
+    "Your email verification code is:\n\n"
+    f"{verification.code}\n\n"
+    "This code will expire in 10 minutes.\n\n"
+    "Please enter this code on the verification page "
+    "to complete your account registration.\n\n"
+    "If you did not create this account, you can safely "
+    "ignore this email.\n\n"
+    "Thank you,\n"
+    "Customer Support"
+),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+@method_decorator(
+
+    ratelimit(
+
+        key="ip",
+
+        rate="10/m",
+
+        method="POST",
+
+        block=True
+
+    ),
+
+    name="dispatch"
+
+)
+class VerifyEmailView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = VerifyEmailSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+
+        try:
+            user = User.objects.get(
+                email=email
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "error": "Account not found"
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            verification = (
+                EmailVerificationCode.objects
+                .get(user=user)
+            )
+        except EmailVerificationCode.DoesNotExist:
+            return Response(
+                {
+                    "error": "Verification code not found"
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if verification.verified_at:
+            return Response(
+                {
+                    "message": "Email is already verified"
+                },
+                status=status.HTTP_200_OK
+            )
+
+        if not verification.is_valid():
+            return Response(
+                {
+                    "error": "Verification code has expired"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if verification.code != code:
+            return Response(
+                {
+                    "error": "Invalid verification code"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        verification.verified_at = timezone.now()
+        verification.save(
+            update_fields=["verified_at"]
+        )
+
+        return Response(
+            {
+                "message": "Email verified successfully"
+            },
+            status=status.HTTP_200_OK
+        )
+@method_decorator(
+
+    ratelimit(
+
+        key="ip",
+
+        rate="5/m",
+
+        method="POST",
+
+        block=True
+
+    ),
+
+    name="dispatch"
+
+)    
+class ResendVerificationView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = ResendVerificationSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        try:
+            user = User.objects.get(
+                email=email
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "message": (
+                        "If an account exists with this email, "
+                        "a verification code has been sent."
+                    )
+                },
+                status=status.HTTP_200_OK
+            )
+
+        try:
+            verification = (
+                EmailVerificationCode.objects
+                .get(user=user)
+            )
+        except EmailVerificationCode.DoesNotExist:
+            verification = EmailVerificationCode.objects.create(
+                user=user,
+                code="000000",
+                expires_at=timezone.now()
+            )
+
+        if verification.verified_at:
+            return Response(
+                {
+                    "message": "Email is already verified"
+                },
+                status=status.HTTP_200_OK
+            )
+
+        verification.generate_code()
+
+        send_mail(
+            subject="Your new verification code",
+            message=(
+                f"Hello {user.first_name or user.username},\n\n"
+                "Here is your new email verification code:\n\n"
+                f"{verification.code}\n\n"
+                "This code will expire in 10 minutes.\n\n"
+                "If you did not request this code, "
+                "you can ignore this email.\n\n"
+                "Thank you,\n"
+                "Customer Support"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+        return Response(
+            {
+                "message": "A new verification code has been sent"
+            },
+            status=status.HTTP_200_OK
+        )   
+@method_decorator(
+
+    ratelimit(
+
+        key="ip",
+
+        rate="5/m",
+
+        method="POST",
+
+        block=True
+
+    ),
+
+    name="dispatch"
+
+)
+class ForgotPasswordView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        try:
+            user = User.objects.get(
+                email=email
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "message": (
+                        "If an account exists with this email, "
+                        "a password reset code has been sent."
+                    )
+                },
+                status=status.HTTP_200_OK
+            )
+
+        reset_code, created = (
+            PasswordResetCode.objects.get_or_create(
+                user=user
+            )
+        )
+
+        reset_code.generate_code()
+
+        send_mail(
+            subject="Reset your password",
+            message=(
+                f"Hello {user.first_name or user.username},\n\n"
+                "We received a request to reset your password.\n\n"
+                "Your password reset code is:\n\n"
+                f"{reset_code.code}\n\n"
+                "This code will expire in 10 minutes.\n\n"
+                "If you did not request a password reset, "
+                "you can safely ignore this email.\n\n"
+                "Thank you,\n"
+                "Customer Support"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+        return Response(
+            {
+                "message": (
+                    "If an account exists with this email, "
+                    "a password reset code has been sent."
+                )
+            },
+            status=status.HTTP_200_OK
+        )
+@method_decorator(
+
+    ratelimit(
+
+        key="ip",
+
+        rate="5/m",
+
+        method="POST",
+
+        block=True
+
+    ),
+
+    name="dispatch"
+
+)    
+class ResetPasswordView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+        new_password = serializer.validated_data["new_password"]
+
+        try:
+            user = User.objects.get(
+                email=email
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "error": "Invalid password reset code"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            reset_code = (
+                PasswordResetCode.objects
+                .get(user=user)
+            )
+        except PasswordResetCode.DoesNotExist:
+            return Response(
+                {
+                    "error": "Invalid password reset code"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not reset_code.is_valid():
+            return Response(
+                {
+                    "error": "Password reset code has expired"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if reset_code.code != code:
+            return Response(
+                {
+                    "error": "Invalid password reset code"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            validate_password(
+                new_password,
+                user
+            )
+        except ValidationError as error:
+            return Response(
+                {
+                    "error": error.messages
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(new_password)
+        user.save(
+            update_fields=["password"]
+        )
+
+        reset_code.delete()
+
+        return Response(
+            {
+                "message": "Password reset successfully"
+            },
+            status=status.HTTP_200_OK
+        )
+
+    
+         
+class MeView(generics.RetrieveAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+class CustomerProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, created = CustomerProfile.objects.get_or_create(
+            user=request.user
+        )
+
+        serializer = CustomerProfileSerializer(profile)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        profile, created = CustomerProfile.objects.get_or_create(
+            user=request.user
+        )
+
+        serializer = CustomerProfileSerializer(
+            profile,
+            data=request.data,
+            partial=True
+        )
+
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data)
+class AdminCustomerListView(generics.ListAPIView):
+    serializer_class = AdminCustomerSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        queryset = (
+            User.objects
+            .filter(
+                is_staff=False
+            )
+            .select_related(
+                "profile"
+            )
+            .prefetch_related(
+                "orders"
+            )
+            .order_by(
+                "-date_joined"
+            )
+        )
+
+        search = self.request.query_params.get(
+            "search"
+        )
+
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search)
+                | Q(email__icontains=search)
+                | Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+            )
+
+        is_active = self.request.query_params.get(
+            "is_active"
+        )
+
+        if is_active == "true":
+            queryset = queryset.filter(
+                is_active=True
+            )
+
+        elif is_active == "false":
+            queryset = queryset.filter(
+                is_active=False
+            )
+
+        return queryset
+
+    
+class AdminCustomerDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class = AdminCustomerSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        return User.objects.filter(
+            is_staff=False
+        ).select_related(
+            "profile"
+        ).prefetch_related(
+            "orders"
+        )    
