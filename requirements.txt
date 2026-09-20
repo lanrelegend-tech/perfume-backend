@@ -4,6 +4,7 @@ charset-normalizer==3.5.1
 cloudinary==1.46.2
 dj-database-url==3.0.1
 Django==4.2.30
+django-cloudinary-storage==0.3.0
 django-cors-headers==4.9.0
 django-filter==25.1
 django-ratelimit==4.1.0
