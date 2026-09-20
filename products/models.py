@@ -10,8 +10,15 @@ class Category(models.Model):
 
 
 class Product(models.Model):
+    GENDER_CHOICES = [
+        ("men", "Men"),
+        ("women", "Women"),
+        ("unisex", "Unisex"),
+    ]
+
     name = models.CharField(max_length=200)
     brand = models.CharField(max_length=100)
+    gender = models.CharField(max_length=20, choices=GENDER_CHOICES, default="unisex")
     description = models.TextField()
 
     category = models.ForeignKey(
