@@ -16,9 +16,18 @@ class Product(models.Model):
         ("unisex", "Unisex"),
     ]
 
+    CONCENTRATION_CHOICES = [
+        ("edp", "Eau de Parfum (EDP)"),
+        ("edt", "Eau de Toilette (EDT)"),
+        ("parfum", "Parfum / Extrait"),
+        ("edc", "Eau de Cologne (EDC)"),
+        ("mist", "Body Mist"),
+    ]
+
     name = models.CharField(max_length=200)
     brand = models.CharField(max_length=100)
     gender = models.CharField(max_length=20, choices=GENDER_CHOICES, default="unisex")
+    concentration = models.CharField(max_length=20, choices=CONCENTRATION_CHOICES, blank=True)
     description = models.TextField()
 
     category = models.ForeignKey(
