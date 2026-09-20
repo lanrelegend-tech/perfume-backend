@@ -41,6 +41,9 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "is_staff",
+
+            "is_superuser",
         ]
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
