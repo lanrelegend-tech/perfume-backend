@@ -12,7 +12,6 @@ urlpatterns = [
         ShippingRateListCreateView.as_view(),
         name="shipping-list-create",
     ),
-
     path(
         "<int:pk>/",
         ShippingRateDetailView.as_view(),
