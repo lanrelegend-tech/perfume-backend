@@ -5,23 +5,42 @@ import resend
 def send_order_confirmation_email(order):
     subject = f"Order Confirmation - {order.order_number}"
 
+    if order.delivery_method == "pickup":
+        fulfillment_info = f"""
+Pickup Order:
+
+Your order will be available for pickup at:
+
+{order.pickup_address or "Pickup location will be provided by ORENTEMIST."}
+
+We will notify you when your order is ready for pickup.
+"""
+    else:
+        fulfillment_info = f"""
+Delivery Address:
+
+{order.address}
+{order.city}, {order.state}
+
+Your order will be delivered to the address above.
+"""
+
     message = f"""
 Hello {order.full_name},
 
-Thank you for your order.
+Thank you for your order with ORENTEMIST.
 
 Order Number: {order.order_number}
+
 Total Amount: ₦{order.total_amount:,.2f}
 Payment Status: {order.payment_status}
 Order Status: {order.status}
 
-Shipping Address:
-{order.address}
-{order.city}, {order.state}
+{fulfillment_info}
 
-We will notify you when your order is shipped.
+We will keep you updated about your order.
 
-Thank you for shopping with us.
+Thank you for shopping with ORENTEMIST.
 """
 
     resend.api_key = settings.RESEND_API_KEY
@@ -36,8 +55,6 @@ Thank you for shopping with us.
     print("RESEND ORDER EMAIL RESPONSE:", response)
 
     return response
-
-
 def send_order_shipped_email(order):
     subject = f"Your Order Has Been Shipped - {order.order_number}"
 
