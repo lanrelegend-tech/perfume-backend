@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+from corsheaders.defaults import default_headers
 
 from dotenv import load_dotenv
 
@@ -210,6 +211,9 @@ STORAGES = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+]
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-guest-session-id",
 ]
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
