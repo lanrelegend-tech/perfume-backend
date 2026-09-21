@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,14 +10,36 @@ from products.models import Product, ProductVariant
 
 
 class CartView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
-    def get_cart(self, user):
-        cart, created = Cart.objects.get_or_create(user=user)
+    def get_cart(self, request):
+        if request.user.is_authenticated:
+            cart, created = Cart.objects.get_or_create(
+                user=request.user
+            )
+            return cart
+
+        session_id = request.headers.get("X-Guest-Session-ID")
+
+        if not session_id:
+            return None
+
+        cart, created = Cart.objects.get_or_create(
+            session_id=session_id,
+            user=None
+        )
+
         return cart
 
     def get(self, request):
-        cart = self.get_cart(request.user)
+        cart = self.get_cart(request)
+
+        if not cart:
+            return Response({
+                "id": None,
+                "items": [],
+                "total": 0,
+            })
 
         serializer = CartSerializer(cart)
 
@@ -25,7 +47,26 @@ class CartView(APIView):
 
 
 class AddToCartView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+
+    def get_cart(self, request):
+        if request.user.is_authenticated:
+            cart, created = Cart.objects.get_or_create(
+                user=request.user
+            )
+            return cart
+
+        session_id = request.headers.get("X-Guest-Session-ID")
+
+        if not session_id:
+            return None
+
+        cart, created = Cart.objects.get_or_create(
+            session_id=session_id,
+            user=None
+        )
+
+        return cart
 
     def post(self, request):
         product_id = request.data.get("product_id")
@@ -47,6 +88,14 @@ class AddToCartView(APIView):
         except (ValueError, TypeError):
             return Response(
                 {"error": "quantity must be a positive number"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart = self.get_cart(request)
+
+        if not cart:
+            return Response(
+                {"error": "Guest session ID is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -74,14 +123,13 @@ class AddToCartView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-        else:
-            if product.variants.exists():
-                return Response(
-                    {
-                        "error": "variant_id is required for this product"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        elif product.variants.exists():
+            return Response(
+                {
+                    "error": "variant_id is required for this product"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if variant:
             if not variant.in_stock:
@@ -109,15 +157,13 @@ class AddToCartView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        cart, created = Cart.objects.get_or_create(
-            user=request.user
-        )
-
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product,
             variant=variant,
-            defaults={"quantity": quantity}
+            defaults={
+                "quantity": quantity
+            }
         )
 
         if not created:
@@ -129,6 +175,7 @@ class AddToCartView(APIView):
                         {"error": "Not enough stock available"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
+
             else:
                 if new_quantity > product.stock_quantity:
                     return Response(
@@ -148,28 +195,59 @@ class AddToCartView(APIView):
 
 
 class UpdateCartItemView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+
+    def get_cart_filter(self, request):
+        if request.user.is_authenticated:
+            return {
+                "cart__user": request.user
+            }
+
+        session_id = request.headers.get("X-Guest-Session-ID")
+
+        if not session_id:
+            return None
+
+        return {
+            "cart__session_id": session_id,
+            "cart__user__isnull": True,
+        }
 
     def patch(self, request, item_id):
         try:
-            quantity = int(request.data.get("quantity"))
+            quantity = int(
+                request.data.get("quantity")
+            )
 
             if quantity < 1:
                 raise ValueError
 
         except (ValueError, TypeError):
             return Response(
-                {"error": "quantity must be a positive number"},
+                {
+                    "error": "quantity must be a positive number"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart_filter = self.get_cart_filter(request)
+
+        if cart_filter is None:
+            return Response(
+                {
+                    "error": "Guest session ID is required"
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             cart_item = CartItem.objects.select_related(
                 "product",
-                "variant"
+                "variant",
+                "cart"
             ).get(
                 id=item_id,
-                cart__user=request.user
+                **cart_filter
             )
 
         except CartItem.DoesNotExist:
@@ -179,34 +257,89 @@ class UpdateCartItemView(APIView):
             )
 
         if cart_item.variant:
-            if quantity > cart_item.variant.stock_quantity:
+            if not cart_item.variant.in_stock:
                 return Response(
-                    {"error": "Not enough stock available"},
+                    {
+                        "error": "This variant is out of stock"
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            if quantity > cart_item.variant.stock_quantity:
+                return Response(
+                    {
+                        "error": "Not enough stock available"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
         else:
+            if not cart_item.product.in_stock:
+                return Response(
+                    {
+                        "error": "Product is out of stock"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             if quantity > cart_item.product.stock_quantity:
                 return Response(
-                    {"error": "Not enough stock available"},
+                    {
+                        "error": "Not enough stock available"
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
         cart_item.quantity = quantity
         cart_item.save()
 
-        serializer = CartSerializer(cart_item.cart)
+        serializer = CartSerializer(
+            cart_item.cart
+        )
 
-        return Response(serializer.data)
+        return Response(
+            serializer.data
+        )
 
 
 class RemoveFromCartView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
+
+    def get_cart_filter(self, request):
+        if request.user.is_authenticated:
+            return {
+                "cart__user": request.user
+            }
+
+        session_id = request.headers.get(
+            "X-Guest-Session-ID"
+        )
+
+        if not session_id:
+            return None
+
+        return {
+            "cart__session_id": session_id,
+            "cart__user__isnull": True,
+        }
 
     def delete(self, request, item_id):
+        cart_filter = self.get_cart_filter(request)
+
+        if cart_filter is None:
+            return Response(
+                {
+                    "error": "Guest session ID is required"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
-            cart_item = CartItem.objects.get(
+            cart_item = CartItem.objects.select_related(
+                "cart"
+            ).get(
                 id=item_id,
-                cart__user=request.user
+                **cart_filter
             )
 
         except CartItem.DoesNotExist:
@@ -221,4 +354,6 @@ class RemoveFromCartView(APIView):
 
         serializer = CartSerializer(cart)
 
-        return Response(serializer.data)
+        return Response(
+            serializer.data
+        )
