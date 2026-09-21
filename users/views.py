@@ -1,5 +1,6 @@
 from rest_framework import generics
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.core.mail import send_mail
 from .models import EmailVerificationCode
@@ -18,6 +19,7 @@ from .models import (
     EmailVerificationCode,
     PasswordResetCode,
 )
+from orders.models import Order
 from rest_framework import status
 from .models import EmailVerificationCode
 from .serializers import VerifyEmailSerializer
@@ -87,6 +89,7 @@ class RegisterView(generics.CreateAPIView):
 class VerifyEmailView(APIView):
     permission_classes = []
 
+    @transaction.atomic
     def post(self, request):
         serializer = VerifyEmailSerializer(
             data=request.data
@@ -147,6 +150,14 @@ class VerifyEmailView(APIView):
             )
 
         verification.verified_at = timezone.now()
+
+        Order.objects.filter(
+            user__isnull=True,
+            email__iexact=user.email,
+        ).update(
+            user=user
+        )
+
         verification.save(
             update_fields=["verified_at"]
         )
@@ -157,23 +168,6 @@ class VerifyEmailView(APIView):
             },
             status=status.HTTP_200_OK
         )
-@method_decorator(
-
-    ratelimit(
-
-        key="ip",
-
-        rate="5/m",
-
-        method="POST",
-
-        block=True
-
-    ),
-
-    name="dispatch"
-
-)    
 class ResendVerificationView(APIView):
     permission_classes = []
 
