@@ -90,17 +90,24 @@ class AdminOrderListView(generics.ListAPIView):
 
         return queryset
 
-class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
+class AdminOrderDetailView(
+    generics.RetrieveUpdateAPIView
+):
     serializer_class = AdminOrderSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
-        return Order.objects.all().prefetch_related(
-            "items",
-            "status_history"
-        ).select_related(
-            "user",
-            "coupon"
+        return (
+            Order.objects
+            .all()
+            .prefetch_related(
+                "items",
+                "status_history"
+            )
+            .select_related(
+                "user",
+                "coupon"
+            )
         )
 
     def perform_update(self, serializer):
@@ -114,27 +121,43 @@ class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
         )
 
         allowed_transitions = {
-            "pending": ["confirmed", "cancelled"],
-            "confirmed": ["processing", "cancelled"],
-            "processing": ["shipped", "cancelled"],
-            "shipped": ["delivered"],
+            "pending": [
+                "confirmed",
+                "cancelled",
+            ],
+            "confirmed": [
+                "processing",
+                "cancelled",
+            ],
+            "processing": [
+                "shipped",
+                "cancelled",
+            ],
+            "shipped": [
+                "delivered",
+            ],
             "delivered": [],
             "cancelled": [],
         }
 
+        allowed_statuses = allowed_transitions.get(
+            old_status,
+            []
+        )
+
         if (
             new_status != old_status
-            and new_status not in allowed_transitions.get(
-                old_status,
-                []
-            )
+            and new_status not in allowed_statuses
         ):
             from rest_framework.exceptions import ValidationError
 
             raise ValidationError({
                 "status": (
                     f"Cannot change order status "
-                    f"from '{old_status}' to '{new_status}'."
+                    f"from '{old_status}' "
+                    f"to '{new_status}'. "
+                    f"Allowed next statuses: "
+                    f"{', '.join(allowed_statuses) or 'none'}."
                 )
             })
 
@@ -149,16 +172,41 @@ class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
                 changed_by=self.request.user,
             )
 
-        if old_status != "shipped" and new_status == "shipped":
-            from .email import send_order_shipped_email
+        if (
+            old_status != "shipped"
+            and new_status == "shipped"
+        ):
+            from .email import (
+                send_order_shipped_email
+            )
 
-            send_order_shipped_email(updated_order)
+            try:
+                send_order_shipped_email(
+                    updated_order
+                )
+            except Exception as e:
+                print(
+                    "SHIPPED EMAIL ERROR:",
+                    repr(e)
+                )
 
-        elif old_status != "delivered" and new_status == "delivered":
-            from .email import send_order_delivered_email
+        elif (
+            old_status != "delivered"
+            and new_status == "delivered"
+        ):
+            from .email import (
+                send_order_delivered_email
+            )
 
-            send_order_delivered_email(updated_order)
-
+            try:
+                send_order_delivered_email(
+                    updated_order
+                )
+            except Exception as e:
+                print(
+                    "DELIVERED EMAIL ERROR:",
+                    repr(e)
+                )
 
 class InitializePaymentView(APIView):
     permission_classes = [AllowAny]
