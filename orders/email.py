@@ -29,7 +29,7 @@ Thank you for shopping with us.
         message,
         settings.DEFAULT_FROM_EMAIL,
         [order.email],
-        fail_silently=True,
+        fail_silently=False,
     )
 
 
