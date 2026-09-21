@@ -11,7 +11,7 @@ from products.models import ProductVariant
 from django.db import transaction
 from django.db.models import Q
 from rest_framework import generics, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -30,7 +30,7 @@ from .serializers import (
 from coupons.models import Coupon
 from .email import send_order_confirmation_email
 from shipping.models import ShippingRate
-from rest_framework.permissions import IsAdminUser
+
 from .dashboard import get_dashboard_stats
 from rest_framework import generics, status
 
@@ -48,7 +48,7 @@ class AdminOrderListView(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = Order.objects.all().prefetch_related(
-            "items"
+            "items",
               "status_history"
         ).select_related(
             "user",
@@ -159,14 +159,13 @@ class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
 
             send_order_delivered_email(updated_order)
 class InitializePaymentView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request, order_id):
         try:
             order = Order.objects.get(
-                id=order_id,
-                user=request.user
-            )
+    id=order_id
+)
         except Order.DoesNotExist:
             return Response(
                 {"error": "Order not found"},
@@ -270,9 +269,8 @@ class InitializePaymentView(APIView):
             ),
         })
 
-    
 class VerifyPaymentView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request):
@@ -289,8 +287,7 @@ class VerifyPaymentView(APIView):
                 Order.objects
                 .select_for_update()
                 .get(
-                    payment_reference=reference,
-                    user=request.user
+                    payment_reference=reference
                 )
             )
         except Order.DoesNotExist:
@@ -314,6 +311,10 @@ class VerifyPaymentView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+        # ---------------------------------
+        # VERIFY PAYMENT WITH PAYSTACK
+        # ---------------------------------
 
         try:
             response = requests.get(
@@ -355,6 +356,10 @@ class VerifyPaymentView(APIView):
 
         payment = data.get("data", {})
 
+        # ---------------------------------
+        # CHECK PAYMENT STATUS
+        # ---------------------------------
+
         if payment.get("status") != "success":
             payment_status = payment.get("status")
 
@@ -379,6 +384,10 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ---------------------------------
+        # VERIFY PAYMENT AMOUNT
+        # ---------------------------------
+
         if payment.get("amount") != int(
             order.total_amount * 100
         ):
@@ -392,6 +401,10 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ---------------------------------
+        # VERIFY CURRENCY
+        # ---------------------------------
+
         if payment.get("currency") != "NGN":
             return Response(
                 {
@@ -403,8 +416,10 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check and lock products/variants
-        # before reducing stock
+        # ---------------------------------
+        # CHECK AND LOCK STOCK
+        # ---------------------------------
+
         for item in order.items.select_related(
             "product",
             "variant"
@@ -453,7 +468,10 @@ class VerifyPaymentView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-        # Reduce stock
+        # ---------------------------------
+        # REDUCE STOCK
+        # ---------------------------------
+
         for item in order.items.select_related(
             "product",
             "variant"
@@ -499,8 +517,10 @@ class VerifyPaymentView(APIView):
                     ]
                 )
 
-        # Increase coupon usage
-        # after successful payment
+        # ---------------------------------
+        # INCREASE COUPON USAGE
+        # ---------------------------------
+
         if order.coupon_id:
             coupon = (
                 Coupon.objects
@@ -510,7 +530,8 @@ class VerifyPaymentView(APIView):
 
             if (
                 coupon.usage_limit is not None
-                and coupon.used_count >= coupon.usage_limit
+                and coupon.used_count
+                >= coupon.usage_limit
             ):
                 return Response(
                     {
@@ -525,39 +546,83 @@ class VerifyPaymentView(APIView):
             coupon.used_count += 1
 
             coupon.save(
-                update_fields=["used_count"]
+                update_fields=[
+                    "used_count"
+                ]
             )
 
-            coupon.used_by.add(order.user)
+            if order.user:
+                coupon.used_by.add(order.user)
 
-        
-          # Mark order as paid
+        # ---------------------------------
+        # MARK ORDER AS PAID
+        # ---------------------------------
+
         old_status = order.status
 
         order.payment_status = "paid"
         order.status = "confirmed"
-        order.payment_reference = payment.get(
-          "reference",
-        reference
-      )
+        order.payment_reference = (
+            payment.get(
+                "reference",
+                reference
+            )
+        )
+
+        order.save(
+            update_fields=[
+                "payment_status",
+                "status",
+                "payment_reference",
+                "updated_at",
+            ]
+        )
+
+        # ---------------------------------
+        # ORDER STATUS HISTORY
+        # ---------------------------------
 
         if old_status != order.status:
             OrderStatusHistory.objects.create(
-            order=order,
-            status=order.status,
-            changed_by=None,
-        note="Payment confirmed",
-       )
-        # Send confirmation email
+                order=order,
+                status=order.status,
+                changed_by=None,
+                note="Payment confirmed",
+            )
+
+        # ---------------------------------
+        # SEND CONFIRMATION EMAIL
+        # ---------------------------------
+
         send_order_confirmation_email(order)
 
-        # Clear cart
-        cart = Cart.objects.filter(
-            user=request.user
-        ).first()
+        # ---------------------------------
+        # CLEAR CART
+        # ---------------------------------
+
+        guest_session_id = request.headers.get(
+            "X-Guest-Session-ID"
+        )
+
+        if order.user:
+            cart = Cart.objects.filter(
+                user=order.user
+            ).first()
+
+        elif guest_session_id:
+            cart = Cart.objects.filter(
+                session_id=guest_session_id
+            ).first()
+
+        else:
+            cart = None
 
         if cart:
             cart.items.all().delete()
+
+        # ---------------------------------
+        # SUCCESS RESPONSE
+        # ---------------------------------
 
         return Response({
             "message": "Payment verified successfully",
@@ -759,11 +824,10 @@ class AdminRefundListView(generics.ListAPIView):
 
         return queryset
         
-    
 class PaystackWebhookView(APIView):
-     
     authentication_classes = []
     permission_classes = []
+
     @transaction.atomic
     def post(self, request):
 
@@ -829,15 +893,25 @@ class PaystackWebhookView(APIView):
         # -----------------------------
 
         try:
-            order = Order.objects.select_for_update().get(
-                payment_reference=reference
+            order = (
+                Order.objects
+                .select_for_update()
+                .get(
+                    payment_reference=reference
+                )
             )
+
         except Order.DoesNotExist:
 
             try:
-                order = Order.objects.select_for_update().get(
-                    order_number=reference
+                order = (
+                    Order.objects
+                    .select_for_update()
+                    .get(
+                        order_number=reference
+                    )
                 )
+
             except Order.DoesNotExist:
                 return HttpResponse(
                     "Order not found",
@@ -855,6 +929,16 @@ class PaystackWebhookView(APIView):
             )
 
         # -----------------------------
+        # VERIFY PAYMENT STATUS
+        # -----------------------------
+
+        if payment.get("status") != "success":
+            return HttpResponse(
+                "Payment was not successful",
+                status=400
+            )
+
+        # -----------------------------
         # VERIFY AMOUNT
         # -----------------------------
 
@@ -867,7 +951,6 @@ class PaystackWebhookView(APIView):
                 "Payment amount does not match order",
                 status=400
             )
-        
 
         # -----------------------------
         # VERIFY CURRENCY
@@ -878,7 +961,8 @@ class PaystackWebhookView(APIView):
                 "Payment currency does not match order",
                 status=400
             )
-               # -----------------------------
+
+        # -----------------------------
         # CHECK AND LOCK STOCK
         # -----------------------------
 
@@ -888,10 +972,13 @@ class PaystackWebhookView(APIView):
         ).all():
 
             if item.variant:
+
                 variant = (
                     ProductVariant.objects
                     .select_for_update()
-                    .get(pk=item.variant.pk)
+                    .get(
+                        pk=item.variant.pk
+                    )
                 )
 
                 if (
@@ -908,10 +995,13 @@ class PaystackWebhookView(APIView):
                     )
 
             elif item.product:
+
                 product = (
                     item.product.__class__.objects
                     .select_for_update()
-                    .get(pk=item.product.pk)
+                    .get(
+                        pk=item.product.pk
+                    )
                 )
 
                 if (
@@ -919,10 +1009,12 @@ class PaystackWebhookView(APIView):
                     or product.stock_quantity < item.quantity
                 ):
                     return HttpResponse(
-                        f"Not enough stock for {item.product_name}",
+                        (
+                            f"Not enough stock for "
+                            f"{item.product_name}"
+                        ),
                         status=400
                     )
-
 
         # -----------------------------
         # REDUCE STOCK
@@ -934,10 +1026,13 @@ class PaystackWebhookView(APIView):
         ).all():
 
             if item.variant:
+
                 variant = (
                     ProductVariant.objects
                     .select_for_update()
-                    .get(pk=item.variant.pk)
+                    .get(
+                        pk=item.variant.pk
+                    )
                 )
 
                 variant.stock_quantity -= item.quantity
@@ -949,15 +1044,18 @@ class PaystackWebhookView(APIView):
                 variant.save(
                     update_fields=[
                         "stock_quantity",
-                        "in_stock"
+                        "in_stock",
                     ]
                 )
 
             elif item.product:
+
                 product = (
                     item.product.__class__.objects
                     .select_for_update()
-                    .get(pk=item.product.pk)
+                    .get(
+                        pk=item.product.pk
+                    )
                 )
 
                 product.stock_quantity -= item.quantity
@@ -969,9 +1067,10 @@ class PaystackWebhookView(APIView):
                 product.save(
                     update_fields=[
                         "stock_quantity",
-                        "in_stock"
+                        "in_stock",
                     ]
                 )
+
         # -----------------------------
         # INCREASE COUPON USAGE
         # -----------------------------
@@ -981,28 +1080,34 @@ class PaystackWebhookView(APIView):
             coupon = (
                 Coupon.objects
                 .select_for_update()
-                .get(pk=order.coupon_id)
+                .get(
+                    pk=order.coupon_id
+                )
             )
 
             if (
                 coupon.usage_limit is not None
-                and coupon.used_count >= coupon.usage_limit
+                and coupon.used_count
+                >= coupon.usage_limit
             ):
                 return HttpResponse(
                     "This coupon has reached its usage limit",
                     status=400
                 )
-    
 
             coupon.used_count += 1
 
             coupon.save(
-               update_fields=[
-        "used_count"
-                 ]
-           )
+                update_fields=[
+                    "used_count"
+                ]
+            )
 
-            coupon.used_by.add(order.user)                      
+            if order.user:
+                coupon.used_by.add(
+                    order.user
+                )
+
         # -----------------------------
         # MARK ORDER AS PAID
         # -----------------------------
@@ -1012,16 +1117,36 @@ class PaystackWebhookView(APIView):
         order.payment_status = "paid"
         order.status = "confirmed"
         order.payment_reference = (
-         payment.get("reference", reference)
-    )
+            payment.get(
+                "reference",
+                reference
+            )
+        )
+
+        order.save(
+            update_fields=[
+                "payment_status",
+                "status",
+                "payment_reference",
+                "updated_at",
+            ]
+        )
+
+        # -----------------------------
+        # ORDER STATUS HISTORY
+        # -----------------------------
 
         if old_status != order.status:
-           OrderStatusHistory.objects.create(
-             order=order,
-             status=order.status,
-              changed_by=None,
-              note="Payment confirmed via Paystack webhook",
-    )
+
+            OrderStatusHistory.objects.create(
+                order=order,
+                status=order.status,
+                changed_by=None,
+                note=(
+                    "Payment confirmed "
+                    "via Paystack webhook"
+                ),
+            )
 
         # -----------------------------
         # SEND CONFIRMATION EMAIL
@@ -1033,18 +1158,36 @@ class PaystackWebhookView(APIView):
         # CLEAR CART
         # -----------------------------
 
-        cart = Cart.objects.filter(
-            user=order.user
-        ).first()
+        if order.user:
+
+            cart = Cart.objects.filter(
+                user=order.user
+            ).first()
+
+        else:
+
+            # Guest orders are handled by
+            # VerifyPaymentView using the
+            # guest session header.
+            #
+            # Paystack webhooks do not contain
+            # the browser's guest session ID,
+            # so we do not attempt to identify
+            # a guest cart here.
+
+            cart = None
 
         if cart:
             cart.items.all().delete()
+
+        # -----------------------------
+        # SUCCESS
+        # -----------------------------
 
         return HttpResponse(
             "Webhook processed successfully",
             status=200
         )
-
 
     
 class OrderListView(generics.ListAPIView):
@@ -1079,17 +1222,44 @@ class OrderTrackingView(generics.RetrieveAPIView):
         )
     
 class CreateOrderView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request):
 
-        cart = Cart.objects.filter(
-            user=request.user
-        ).prefetch_related(
-            "items__product",
-            "items__variant"
-        ).first()
+        # ---------------------------------
+        # GET CART
+        # ---------------------------------
+
+        if request.user.is_authenticated:
+            cart = Cart.objects.filter(
+                user=request.user
+            ).prefetch_related(
+                "items__product",
+                "items__variant"
+            ).first()
+
+        else:
+            guest_session_id = request.headers.get(
+                "X-Guest-Session-ID"
+            )
+
+            if not guest_session_id:
+                return Response(
+                    {
+                        "error": (
+                            "Guest session ID is required"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            cart = Cart.objects.filter(
+                session_id=guest_session_id
+            ).prefetch_related(
+                "items__product",
+                "items__variant"
+            ).first()
 
         if not cart or not cart.items.exists():
             return Response(
@@ -1097,30 +1267,98 @@ class CreateOrderView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        required_fields = [
-            "full_name",
-            "phone",
-            "email",
-            "address",
-            "city",
-            "state",
-        ]
+        # ---------------------------------
+        # CUSTOMER INFORMATION
+        # ---------------------------------
 
-        for field in required_fields:
-            if not request.data.get(field):
+        customer = request.data.get("customer")
+
+        if isinstance(customer, dict):
+            full_name = (
+                customer.get("full_name")
+                or " ".join(
+                    filter(
+                        None,
+                        [
+                            customer.get("firstName"),
+                            customer.get("lastName"),
+                        ]
+                    )
+                ).strip()
+            )
+
+            phone = customer.get("phone")
+            email = customer.get("email")
+            address = customer.get("address")
+            city = customer.get("city")
+            state = customer.get("state")
+        else:
+            full_name = request.data.get("full_name")
+            phone = request.data.get("phone")
+            email = request.data.get("email")
+            address = request.data.get("address")
+            city = request.data.get("city")
+            state = request.data.get("state")
+
+        delivery_method = request.data.get(
+            "delivery_method",
+            "delivery"
+        )
+
+        pickup_address = request.data.get(
+            "pickup_address"
+        )
+
+        # ---------------------------------
+        # VALIDATE CUSTOMER INFORMATION
+        # ---------------------------------
+
+        required_fields = {
+            "full_name": full_name,
+            "phone": phone,
+            "email": email,
+        }
+
+        if delivery_method == "delivery":
+            required_fields.update({
+                "address": address,
+                "city": city,
+                "state": state,
+            })
+
+        for field, value in required_fields.items():
+            if not value:
                 return Response(
-                    {"error": f"{field} is required"},
+                    {
+                        "error": (
+                            f"{field} is required"
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        products_total = Decimal("0.00")
-        delivery_fee = Decimal("0.00")
-        discount_amount = Decimal("0.00")
-        coupon = None
+        # ---------------------------------
+        # VALIDATE DELIVERY METHOD
+        # ---------------------------------
 
-        # -----------------------------
-        # CHECK PRODUCTS AND VARIANTS
-        # -----------------------------
+        if delivery_method not in [
+            "delivery",
+            "pickup",
+        ]:
+            return Response(
+                {
+                    "error": (
+                        "Invalid delivery method"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ---------------------------------
+        # CALCULATE PRODUCTS TOTAL
+        # ---------------------------------
+
+        products_total = Decimal("0.00")
 
         for cart_item in cart.items.all():
 
@@ -1128,18 +1366,23 @@ class CreateOrderView(APIView):
             variant = cart_item.variant
 
             if variant:
+
                 if not variant.in_stock:
                     return Response(
                         {
                             "error": (
                                 f"{product.name} "
-                                f"{variant.size} is out of stock"
+                                f"{variant.size} "
+                                f"is out of stock"
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                if cart_item.quantity > variant.stock_quantity:
+                if (
+                    cart_item.quantity
+                    > variant.stock_quantity
+                ):
                     return Response(
                         {
                             "error": (
@@ -1152,21 +1395,27 @@ class CreateOrderView(APIView):
                     )
 
                 products_total += (
-                    variant.price * cart_item.quantity
+                    variant.price
+                    * cart_item.quantity
                 )
 
             else:
+
                 if not product.in_stock:
                     return Response(
                         {
                             "error": (
-                                f"{product.name} is out of stock"
+                                f"{product.name} "
+                                "is out of stock"
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                if cart_item.quantity > product.stock_quantity:
+                if (
+                    cart_item.quantity
+                    > product.stock_quantity
+                ):
                     return Response(
                         {
                             "error": (
@@ -1178,36 +1427,87 @@ class CreateOrderView(APIView):
                     )
 
                 products_total += (
-                    product.price * cart_item.quantity
+                    product.price
+                    * cart_item.quantity
                 )
 
-        # -----------------------------
-        # FIND SHIPPING RATE
-        # -----------------------------
+        # ---------------------------------
+        # SHIPPING
+        # ---------------------------------
 
-        shipping_rate = ShippingRate.objects.filter(
-            state__iexact=request.data.get("state").strip(),
-            is_active=True
-        ).first()
+        delivery_fee = Decimal("0.00")
+        shipping_rate = None
 
-        if not shipping_rate:
-            return Response(
-                {
-                    "error": (
-                        "Delivery is not available "
-                        f"to {request.data.get('state')}"
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
+        if delivery_method == "delivery":
+
+            shipping_rate = ShippingRate.objects.filter(
+                state__iexact=state.strip(),
+                is_active=True
+            ).first()
+
+            if not shipping_rate:
+                return Response(
+                    {
+                        "error": (
+                            "Delivery is not available "
+                            f"to {state}"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            delivery_fee = shipping_rate.delivery_fee
+
+        else:
+
+            shipping_rate = ShippingRate.objects.filter(
+                delivery_type="pickup",
+                is_active=True
+            ).first()
+
+            if not shipping_rate:
+                return Response(
+                    {
+                        "error": (
+                            "Pickup is currently "
+                            "not available"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            pickup_address = (
+                shipping_rate.pickup_address
+                or pickup_address
             )
 
-        delivery_fee = shipping_rate.delivery_fee
+            if not pickup_address:
+                return Response(
+                    {
+                        "error": (
+                            "Pickup address is not "
+                            "configured"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        # -----------------------------
-        # APPLY COUPON
-        # -----------------------------
+            delivery_fee = Decimal("0.00")
 
-        coupon_code = request.data.get("coupon_code")
+            address = ""
+            city = ""
+            state = ""
+
+        # ---------------------------------
+        # COUPON
+        # ---------------------------------
+
+        discount_amount = Decimal("0.00")
+        coupon = None
+
+        coupon_code = request.data.get(
+            "coupon_code"
+        )
 
         if coupon_code:
 
@@ -1218,7 +1518,11 @@ class CreateOrderView(APIView):
 
             except Coupon.DoesNotExist:
                 return Response(
-                    {"error": "Invalid coupon code"},
+                    {
+                        "error": (
+                            "Invalid coupon code"
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -1226,7 +1530,11 @@ class CreateOrderView(APIView):
 
             if not coupon.is_active:
                 return Response(
-                    {"error": "This coupon is inactive"},
+                    {
+                        "error": (
+                            "This coupon is inactive"
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -1235,13 +1543,18 @@ class CreateOrderView(APIView):
                 and coupon.expires_at <= timezone.now()
             ):
                 return Response(
-                    {"error": "This coupon has expired"},
+                    {
+                        "error": (
+                            "This coupon has expired"
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if (
                 coupon.usage_limit is not None
-                and coupon.used_count >= coupon.usage_limit
+                and coupon.used_count
+                >= coupon.usage_limit
             ):
                 return Response(
                     {
@@ -1252,17 +1565,28 @@ class CreateOrderView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            if coupon.used_by.filter(
-                id=request.user.id
-               ).exists():
+
+            # Only check used_by for logged-in users.
+            if (
+                request.user.is_authenticated
+                and coupon.used_by.filter(
+                    id=request.user.id
+                ).exists()
+            ):
                 return Response(
                     {
-                          "error": "You have already used this coupon"
+                        "error": (
+                            "You have already used "
+                            "this coupon"
+                        )
                     },
                     status=status.HTTP_400_BAD_REQUEST
-            )
+                )
 
-            if products_total < coupon.minimum_order_amount:
+            if (
+                products_total
+                < coupon.minimum_order_amount
+            ):
                 return Response(
                     {
                         "error": (
@@ -1288,16 +1612,18 @@ class CreateOrderView(APIView):
                     )
 
             else:
-                discount_amount = coupon.discount_value
+                discount_amount = (
+                    coupon.discount_value
+                )
 
             discount_amount = min(
                 discount_amount,
                 products_total
             )
 
-        # -----------------------------
+        # ---------------------------------
         # FINAL TOTAL
-        # -----------------------------
+        # ---------------------------------
 
         total = (
             products_total
@@ -1305,38 +1631,56 @@ class CreateOrderView(APIView):
             + delivery_fee
         )
 
-        # -----------------------------
+        # ---------------------------------
         # CREATE ORDER
-        # -----------------------------
+        # ---------------------------------
 
         order = Order.objects.create(
-            user=request.user,
+            user=(
+                request.user
+                if request.user.is_authenticated
+                else None
+            ),
             total_amount=total,
             delivery_fee=delivery_fee,
             coupon=coupon,
             discount_amount=discount_amount,
-            full_name=request.data.get("full_name"),
-            phone=request.data.get("phone"),
-            email=request.data.get("email"),
-            address=request.data.get("address"),
-            city=request.data.get("city"),
-            state=request.data.get("state"),
-            notes=request.data.get("notes", ""),
+            delivery_method=delivery_method,
+            pickup_address=(
+                pickup_address
+                if delivery_method == "pickup"
+                else ""
+            ),
+            full_name=full_name,
+            phone=phone,
+            email=email,
+            address=address or "",
+            city=city or "",
+            state=state or "",
+            notes=request.data.get(
+                "notes",
+                ""
+            ),
         )
-                # -----------------------------
-        # CREATE INITIAL STATUS HISTORY
-        # -----------------------------
+
+        # ---------------------------------
+        # ORDER STATUS HISTORY
+        # ---------------------------------
 
         OrderStatusHistory.objects.create(
             order=order,
             status="pending",
-            changed_by=request.user,
+            changed_by=(
+                request.user
+                if request.user.is_authenticated
+                else None
+            ),
             note="Order created",
         )
 
-        # -----------------------------
+        # ---------------------------------
         # CREATE ORDER ITEMS
-        # -----------------------------
+        # ---------------------------------
 
         for cart_item in cart.items.all():
 
@@ -1360,6 +1704,10 @@ class CreateOrderView(APIView):
                 product_price=item_price,
                 quantity=cart_item.quantity,
             )
+
+        # ---------------------------------
+        # RESPONSE
+        # ---------------------------------
 
         serializer = OrderSerializer(order)
 

@@ -19,12 +19,13 @@ class Order(models.Model):
         ("failed", "Failed"),
         ("refunded", "Refunded"),
     ]
-
     user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="orders"
-    )
+    User,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="orders"
+)
 
     order_number = models.CharField(
         max_length=30,
@@ -74,14 +75,39 @@ class Order(models.Model):
         blank=True,
         null=True
     )
+    delivery_method = models.CharField(
+    max_length=20,
+    choices=[
+        ("delivery", "Home Delivery"),
+        ("pickup", "Pickup"),
+    ],
+    default="delivery"
+)
+
+    pickup_address = models.TextField(
+    blank=True,
+    null=True
+)
 
     full_name = models.CharField(max_length=200)
     phone = models.CharField(max_length=30)
     email = models.EmailField()
-    address = models.TextField()
-    city = models.CharField(max_length=100)
-    state = models.CharField(max_length=100)
+    address = models.TextField(
+    blank=True,
+    null=True
+)
 
+    city = models.CharField(
+    max_length=100,
+    blank=True,
+    null=True
+)
+
+    state = models.CharField(
+    max_length=100,
+    blank=True,
+    null=True
+)
     notes = models.TextField(blank=True)
     courier = models.CharField(
         max_length=100,
