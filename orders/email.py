@@ -24,13 +24,19 @@ We will notify you when your order is shipped.
 Thank you for shopping with us.
 """
 
-    send_mail(
+    sent_count = send_mail(
         subject,
         message,
         settings.DEFAULT_FROM_EMAIL,
         [order.email],
         fail_silently=False,
     )
+
+    print("================================")
+    print("ORDER EMAIL SENT COUNT:", sent_count)
+    print("ORDER EMAIL TO:", order.email)
+    print("ORDER EMAIL FROM:", settings.DEFAULT_FROM_EMAIL)
+    print("================================")
 
 
 def send_order_shipped_email(order):
