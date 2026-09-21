@@ -158,14 +158,16 @@ class AdminOrderDetailView(generics.RetrieveUpdateAPIView):
             from .email import send_order_delivered_email
 
             send_order_delivered_email(updated_order)
+
+
 class InitializePaymentView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request, order_id):
         try:
             order = Order.objects.get(
-    id=order_id
-)
+                id=order_id
+            )
         except Order.DoesNotExist:
             return Response(
                 {"error": "Order not found"},
@@ -192,7 +194,6 @@ class InitializePaymentView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # Generate a unique reference for every payment attempt
         payment_reference = (
             f"{order.order_number}-"
             f"{uuid.uuid4().hex[:12].upper()}"
@@ -205,6 +206,11 @@ class InitializePaymentView(APIView):
             ),
             "currency": "NGN",
             "reference": payment_reference,
+
+            "callback_url": (
+                "http://localhost:3000/payment-callback"
+            ),
+
             "metadata": {
                 "order_id": order.id,
                 "order_number": order.order_number,
@@ -269,6 +275,7 @@ class InitializePaymentView(APIView):
             ),
         })
 
+    
 class VerifyPaymentView(APIView):
     permission_classes = [AllowAny]
 
