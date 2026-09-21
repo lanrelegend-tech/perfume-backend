@@ -597,10 +597,19 @@ class VerifyPaymentView(APIView):
                 note="Payment confirmed",
             )
 
-        # ---------------------------------
-        # SEND CONFIRMATION EMAIL
-        # ---------------------------------
+         # ---------------------------------
+         # SEND CONFIRMATION EMAIL
+         # ---------------------------------
 
+        print("ABOUT TO SEND ORDER EMAIL")
+        print("ORDER EMAIL:", order.email)
+
+        try:
+            send_order_confirmation_email(order)
+            print("ORDER EMAIL FUNCTION FINISHED")
+        except Exception as e:
+            print("EMAIL ERROR:", repr(e))
+            raise
         
 
         # ---------------------------------
