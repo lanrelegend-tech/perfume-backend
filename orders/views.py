@@ -609,7 +609,7 @@ class VerifyPaymentView(APIView):
             print("ORDER EMAIL FUNCTION FINISHED")
         except Exception as e:
             print("EMAIL ERROR:", repr(e))
-            raise
+            
         
 
         # ---------------------------------

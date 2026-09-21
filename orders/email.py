@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.core.mail import send_mail
+import resend
 
 
 def send_order_confirmation_email(order):
@@ -24,26 +24,24 @@ We will notify you when your order is shipped.
 Thank you for shopping with us.
 """
 
-    sent_count = send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [order.email],
-        fail_silently=False,
-    )
+    resend.api_key = settings.RESEND_API_KEY
 
-    print("================================")
-    print("ORDER EMAIL SENT COUNT:", sent_count)
-    print("ORDER EMAIL TO:", order.email)
-    print("ORDER EMAIL FROM:", settings.DEFAULT_FROM_EMAIL)
-    print("================================")
+    response = resend.Emails.send({
+        "from": "ORENTEMIST <onboarding@resend.dev>",
+        "to": [order.email],
+        "subject": subject,
+        "text": message,
+    })
+
+    print("RESEND ORDER EMAIL RESPONSE:", response)
+
+    return response
 
 
 def send_order_shipped_email(order):
     subject = f"Your Order Has Been Shipped - {order.order_number}"
 
     tracking_info = order.tracking_number or "Not provided"
-
     courier_info = order.courier or "Not provided"
 
     message = f"""
@@ -68,13 +66,18 @@ You can use the tracking number with the courier to track your package.
 Thank you for shopping with us.
 """
 
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [order.email],
-        fail_silently=True,
-    )
+    resend.api_key = settings.RESEND_API_KEY
+
+    response = resend.Emails.send({
+        "from": "ORENTEMIST <onboarding@resend.dev>",
+        "to": [order.email],
+        "subject": subject,
+        "text": message,
+    })
+
+    print("RESEND SHIPPED EMAIL RESPONSE:", response)
+
+    return response
 
 
 def send_order_delivered_email(order):
@@ -97,10 +100,15 @@ Thank you for shopping with us.
 We hope you enjoy your purchase.
 """
 
-    send_mail(
-        subject,
-        message,
-        settings.DEFAULT_FROM_EMAIL,
-        [order.email],
-        fail_silently=True,
-    )
+    resend.api_key = settings.RESEND_API_KEY
+
+    response = resend.Emails.send({
+        "from": "ORENTEMIST <onboarding@resend.dev>",
+        "to": [order.email],
+        "subject": subject,
+        "text": message,
+    })
+
+    print("RESEND DELIVERED EMAIL RESPONSE:", response)
+
+    return response
