@@ -1,7 +1,21 @@
 from django.urls import path
-from .views import ShippingRateListView
+
+from .views import (
+    ShippingRateListCreateView,
+    ShippingRateDetailView,
+)
 
 
 urlpatterns = [
-    path("", ShippingRateListView.as_view(), name="shipping-rates"),
+    path(
+        "",
+        ShippingRateListCreateView.as_view(),
+        name="shipping-list-create",
+    ),
+
+    path(
+        "<int:pk>/",
+        ShippingRateDetailView.as_view(),
+        name="shipping-detail",
+    ),
 ]

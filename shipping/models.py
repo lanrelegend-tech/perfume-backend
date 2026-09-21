@@ -24,5 +24,8 @@ class ShippingRate(models.Model):
         auto_now=True
     )
 
+    class Meta:
+        ordering = ["state"]
+
     def __str__(self):
-        return f"{self.state} - ₦{self.delivery_fee:,.2f}"
+        return f"{self.state} - ₦{self.delivery_fee}"
