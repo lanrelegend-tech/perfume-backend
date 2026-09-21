@@ -187,14 +187,62 @@ class AdminProductImageListCreateView(generics.ListCreateAPIView):
             ).update(is_primary=False)
 
         serializer.save()
-
-
 class AdminProductImageDetailView(
     generics.RetrieveDestroyAPIView
 ):
-    queryset = ProductImage.objects.select_related("product").all()
+    queryset = ProductImage.objects.select_related(
+        "product"
+    ).all()
+
     serializer_class = AdminProductImageSerializer
     permission_classes = [IsAdminUser]
+
+    def perform_destroy(self, instance):
+        product = instance.product
+        was_primary = instance.is_primary
+
+        instance.delete()
+
+        if was_primary:
+            next_image = (
+                product.images
+                .order_by("created_at", "id")
+                .first()
+            )
+
+            if next_image:
+                # Make the next image the primary
+                product.images.update(
+                    is_primary=False
+                )
+
+                next_image.is_primary = True
+                next_image.save(
+                    update_fields=["is_primary"]
+                )
+
+                # Make the same image the actual
+                # Product.image used by the big card.
+                product.image.name = (
+                    next_image.image.name
+                )
+
+                product.save(
+                    update_fields=[
+                        "image",
+                        "updated_at",
+                    ]
+                )
+            else:
+                # No images remain.
+                product.image = None
+
+                product.save(
+                    update_fields=[
+                        "image",
+                        "updated_at",
+                    ]
+                )
     
 class AdminProductBulkImageUploadView(APIView):
     permission_classes = [IsAdminUser]
@@ -227,17 +275,22 @@ class AdminProductBulkImageUploadView(APIView):
 
         created_images = []
 
+        has_primary = product.images.filter(
+            is_primary=True
+        ).exists()
+
         for index, image in enumerate(images):
             product_image = ProductImage.objects.create(
                 product=product,
                 image=image,
                 is_primary=(
-                    index == 0
-                    and not product.images.filter(
-                        is_primary=True
-                    ).exists()
+                    not has_primary
+                    and index == 0
                 )
             )
+
+            if product_image.is_primary:
+                has_primary = True
 
             created_images.append(product_image)
 
@@ -250,7 +303,7 @@ class AdminProductBulkImageUploadView(APIView):
         return Response(
             serializer.data,
             status=status.HTTP_201_CREATED
-        )   
+        )
 class AdminLowStockView(APIView):
     permission_classes = [IsAdminUser]
 
