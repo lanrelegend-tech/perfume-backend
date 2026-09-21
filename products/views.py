@@ -193,35 +193,37 @@ class AdminProductImageDetailView(
     queryset = ProductImage.objects.select_related(
         "product"
     ).all()
-
     serializer_class = AdminProductImageSerializer
     permission_classes = [IsAdminUser]
-def post(self, request, *args, **kwargs):
-    instance = self.get_object()
-    product = instance.product
 
-    product.images.update(is_primary=False)
+    def post(self, request, *args, **kwargs):
+        instance = self.get_object()
+        product = instance.product
 
-    instance.is_primary = True
-    instance.save(
-        update_fields=["is_primary"]
-    )
+        product.images.update(
+            is_primary=False
+        )
 
-    product.image.name = instance.image.name
+        instance.is_primary = True
+        instance.save(
+            update_fields=["is_primary"]
+        )
 
-    product.save(
-        update_fields=[
-            "image",
-            "updated_at",
-        ]
-    )
+        product.image.name = instance.image.name
 
-    serializer = self.get_serializer(instance)
+        product.save(
+            update_fields=[
+                "image",
+                "updated_at",
+            ]
+        )
 
-    return Response(
-        serializer.data,
-        status=status.HTTP_200_OK,
-    )
+        serializer = self.get_serializer(instance)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
     def perform_destroy(self, instance):
         product = instance.product
         was_primary = instance.is_primary
