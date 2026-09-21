@@ -5,10 +5,7 @@ from .models import Order, OrderItem
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product_image = serializers.CharField(
-        source="product.image",
-        read_only=True
-    )
+    product_image = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
@@ -24,6 +21,21 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "quantity",
             "subtotal",
         ]
+
+    def get_product_image(self, obj):
+        if not obj.product:
+            return None
+
+        image = obj.product.image
+
+        if not image:
+            return None
+
+        try:
+            return image.url
+        except Exception:
+            return None
+        
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(
