@@ -9,9 +9,22 @@ class ShippingRateListCreateView(generics.ListCreateAPIView):
     serializer_class = ShippingRateSerializer
 
     def get_queryset(self):
+        user = self.request.user
+
+        if user.is_authenticated and user.is_staff:
+            return ShippingRate.objects.all().order_by(
+                "delivery_type",
+                "state",
+                "id",
+            )
+
         return ShippingRate.objects.filter(
             is_active=True
-        ).order_by("state")
+        ).order_by(
+            "delivery_type",
+            "state",
+            "id",
+        )
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -24,7 +37,14 @@ class ShippingRateDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ShippingRateSerializer
 
     def get_queryset(self):
-        return ShippingRate.objects.all()
+        user = self.request.user
+
+        if user.is_authenticated and user.is_staff:
+            return ShippingRate.objects.all()
+
+        return ShippingRate.objects.filter(
+            is_active=True
+        )
 
     def get_permissions(self):
         if self.request.method == "GET":
