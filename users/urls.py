@@ -14,6 +14,7 @@ from .views import (
     ResendVerificationView,
     ForgotPasswordView, 
     ResetPasswordView,
+    AdminGuestCustomerListView,
 )
 
 
@@ -53,5 +54,10 @@ path(
     "reset-password/",
     ResetPasswordView.as_view(),
     name="reset-password"
+),
+path(
+    "admin/guests/",
+    AdminGuestCustomerListView.as_view(),
+    name="admin-guest-customer-list",
 ),
 ]

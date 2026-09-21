@@ -1,9 +1,11 @@
 from rest_framework import generics
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
 from django.core.mail import send_mail
 from .models import EmailVerificationCode
+from django.db.models import Q, Count, Sum
+
+from orders.models import Order
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from .serializers import RegisterSerializer, UserSerializer
 from rest_framework.response import Response
@@ -515,3 +517,56 @@ class AdminCustomerDetailView(generics.RetrieveUpdateAPIView):
         ).prefetch_related(
             "orders"
         )    
+
+class AdminGuestCustomerListView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        guests = (
+            Order.objects
+            .filter(
+                user__isnull=True
+            )
+            .exclude(
+                email__isnull=True
+            )
+            .exclude(
+                email=""
+            )
+            .values("email")
+            .annotate(
+                order_count=Count("id"),
+                total_spent=Sum(
+                    "total_amount",
+                    filter=Q(
+                        payment_status="paid"
+                    )
+                ),
+            )
+            .order_by("-order_count")
+        )
+
+        results = []
+
+        for guest in guests:
+            results.append({
+                "id": f"guest-{guest['email']}",
+                "email": guest["email"],
+                "first_name": "",
+                "last_name": "",
+                "username": "",
+                "phone": "",
+                "address": "",
+                "city": "",
+                "state": "",
+                "order_count": guest["order_count"],
+                "total_spent": guest["total_spent"] or 0,
+                "is_active": True,
+                "date_joined": None,
+                "customer_type": "guest",
+            })
+
+        return Response({
+            "count": len(results),
+            "results": results,
+        })    
