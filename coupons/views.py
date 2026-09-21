@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import generics
@@ -14,10 +14,8 @@ from .serializers import CouponSerializer
 
 
 
-
 class ValidateCouponView(APIView):
-    permission_classes = [IsAuthenticated]
-
+    permission_classes = [AllowAny]
     def post(self, request):
         code = request.data.get("code")
         order_amount = request.data.get("order_amount")
