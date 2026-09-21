@@ -6,8 +6,13 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import generics
+from rest_framework.permissions import IsAdminUser
 
 from .models import Coupon
+from .serializers import CouponSerializer
+
+
 
 
 class ValidateCouponView(APIView):
@@ -113,3 +118,14 @@ class ValidateCouponView(APIView):
             "original_amount": str(order_amount),
             "final_amount": str(final_amount),
         })
+
+class AdminCouponListCreateView(generics.ListCreateAPIView):
+    queryset = Coupon.objects.all().order_by("-created_at")
+    serializer_class = CouponSerializer
+    permission_classes = [IsAdminUser]
+
+
+class AdminCouponDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Coupon.objects.all()
+    serializer_class = CouponSerializer
+    permission_classes = [IsAdminUser]    
