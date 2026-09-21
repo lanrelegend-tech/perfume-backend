@@ -601,7 +601,7 @@ class VerifyPaymentView(APIView):
         # SEND CONFIRMATION EMAIL
         # ---------------------------------
 
-        send_order_confirmation_email(order)
+        
 
         # ---------------------------------
         # CLEAR CART
@@ -1159,7 +1159,11 @@ class PaystackWebhookView(APIView):
         # SEND CONFIRMATION EMAIL
         # -----------------------------
 
-        send_order_confirmation_email(order)
+        try:
+    send_order_confirmation_email(order)
+except Exception as e:
+    print("EMAIL ERROR:", repr(e))
+    raise
 
         # -----------------------------
         # CLEAR CART
