@@ -1172,7 +1172,7 @@ class PaystackWebhookView(APIView):
           send_order_confirmation_email(order)
         except Exception as e:
           print("EMAIL ERROR:", repr(e))
-        raise
+        
 
         # -----------------------------
         # CLEAR CART
