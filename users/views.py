@@ -1,46 +1,48 @@
-from rest_framework import generics
-from django.conf import settings
-from django.db import transaction
-from django.core.mail import send_mail
-from .models import EmailVerificationCode
-from django.db.models import Q, Count, Sum
+from datetime import timedelta
 
-from orders.models import Order
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
-from .serializers import RegisterSerializer, UserSerializer
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from django.utils import timezone
+from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
+from django.db import transaction
+from django.db.models import Q, Count, Sum
+from django.utils import timezone
+
 from django_ratelimit.decorators import ratelimit
 from django.utils.decorators import method_decorator
-from rest_framework.views import APIView
+
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
-from datetime import timedelta
+from rest_framework.views import APIView
+
+from orders.models import Order
+
 from .models import (
     EmailVerificationCode,
     PasswordResetCode,
+    CustomerProfile,
 )
-from orders.models import Order
-from rest_framework import status
-from .models import EmailVerificationCode
-from .serializers import VerifyEmailSerializer
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
-from .models import CustomerProfile
+
 from .serializers import (
     RegisterSerializer,
     UserSerializer,
     CustomerProfileSerializer,
     AdminCustomerSerializer,
+    VerifyEmailSerializer,
     ResendVerificationSerializer,
-    ForgotPasswordSerializer, 
+    ForgotPasswordSerializer,
     ResetPasswordSerializer,
 )
 
 
+# =========================================================
+# REGISTER
+# =========================================================
+
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
 
     def perform_create(self, serializer):
         user = serializer.save()
@@ -51,45 +53,49 @@ class RegisterView(generics.CreateAPIView):
 
         verification.generate_code()
 
-        send_mail(
-            subject="Verify your email",
-           message=(
-    f"Hello {user.first_name or user.username},\n\n"
-    "Welcome to our store! 🎉\n\n"
-    "Thank you for creating an account with us.\n\n"
-    "Your email verification code is:\n\n"
-    f"{verification.code}\n\n"
-    "This code will expire in 10 minutes.\n\n"
-    "Please enter this code on the verification page "
-    "to complete your account registration.\n\n"
-    "If you did not create this account, you can safely "
-    "ignore this email.\n\n"
-    "Thank you,\n"
-    "Customer Support"
-),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        # Resend / email debugging
+        try:
+            send_mail(
+                subject="Verify your email",
+                message=(
+                    f"Hello {user.first_name or user.username},\n\n"
+                    "Welcome to our store! 🎉\n\n"
+                    "Thank you for creating an account with us.\n\n"
+                    "Your email verification code is:\n\n"
+                    f"{verification.code}\n\n"
+                    "This code will expire in 10 minutes.\n\n"
+                    "Please enter this code on the verification page "
+                    "to complete your account registration.\n\n"
+                    "If you did not create this account, you can safely "
+                    "ignore this email.\n\n"
+                    "Thank you,\n"
+                    "Customer Support"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+
+        except Exception as error:
+            print("REGISTER EMAIL ERROR:", repr(error))
+            raise
+
+
+# =========================================================
+# VERIFY EMAIL
+# =========================================================
+
 @method_decorator(
-
     ratelimit(
-
         key="ip",
-
         rate="10/m",
-
         method="POST",
-
-        block=True
-
+        block=True,
     ),
-
-    name="dispatch"
-
+    name="dispatch",
 )
 class VerifyEmailView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request):
@@ -111,7 +117,7 @@ class VerifyEmailView(APIView):
                 {
                     "error": "Account not found"
                 },
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         try:
@@ -124,7 +130,7 @@ class VerifyEmailView(APIView):
                 {
                     "error": "Verification code not found"
                 },
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         if verification.verified_at:
@@ -132,7 +138,7 @@ class VerifyEmailView(APIView):
                 {
                     "message": "Email is already verified"
                 },
-                status=status.HTTP_200_OK
+                status=status.HTTP_200_OK,
             )
 
         if not verification.is_valid():
@@ -140,7 +146,7 @@ class VerifyEmailView(APIView):
                 {
                     "error": "Verification code has expired"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if verification.code != code:
@@ -148,11 +154,12 @@ class VerifyEmailView(APIView):
                 {
                     "error": "Invalid verification code"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         verification.verified_at = timezone.now()
 
+        # Attach previous guest orders to the new account
         Order.objects.filter(
             user__isnull=True,
             email__iexact=user.email,
@@ -168,10 +175,16 @@ class VerifyEmailView(APIView):
             {
                 "message": "Email verified successfully"
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
+
+
+# =========================================================
+# RESEND VERIFICATION CODE
+# =========================================================
+
 class ResendVerificationView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ResendVerificationSerializer(
@@ -194,7 +207,7 @@ class ResendVerificationView(APIView):
                         "a verification code has been sent."
                     )
                 },
-                status=status.HTTP_200_OK
+                status=status.HTTP_200_OK,
             )
 
         try:
@@ -206,7 +219,7 @@ class ResendVerificationView(APIView):
             verification = EmailVerificationCode.objects.create(
                 user=user,
                 code="000000",
-                expires_at=timezone.now()
+                expires_at=timezone.now(),
             )
 
         if verification.verified_at:
@@ -214,53 +227,59 @@ class ResendVerificationView(APIView):
                 {
                     "message": "Email is already verified"
                 },
-                status=status.HTTP_200_OK
+                status=status.HTTP_200_OK,
             )
 
         verification.generate_code()
 
-        send_mail(
-            subject="Your new verification code",
-            message=(
-                f"Hello {user.first_name or user.username},\n\n"
-                "Here is your new email verification code:\n\n"
-                f"{verification.code}\n\n"
-                "This code will expire in 10 minutes.\n\n"
-                "If you did not request this code, "
-                "you can ignore this email.\n\n"
-                "Thank you,\n"
-                "Customer Support"
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        try:
+            send_mail(
+                subject="Your new verification code",
+                message=(
+                    f"Hello {user.first_name or user.username},\n\n"
+                    "Here is your new email verification code:\n\n"
+                    f"{verification.code}\n\n"
+                    "This code will expire in 10 minutes.\n\n"
+                    "If you did not request this code, "
+                    "you can ignore this email.\n\n"
+                    "Thank you,\n"
+                    "Customer Support"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+
+        except Exception as error:
+            print(
+                "RESEND VERIFICATION EMAIL ERROR:",
+                repr(error)
+            )
+            raise
 
         return Response(
             {
                 "message": "A new verification code has been sent"
             },
-            status=status.HTTP_200_OK
-        )   
+            status=status.HTTP_200_OK,
+        )
+
+
+# =========================================================
+# FORGOT PASSWORD
+# =========================================================
+
 @method_decorator(
-
     ratelimit(
-
         key="ip",
-
         rate="5/m",
-
         method="POST",
-
-        block=True
-
+        block=True,
     ),
-
-    name="dispatch"
-
+    name="dispatch",
 )
 class ForgotPasswordView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(
@@ -283,7 +302,7 @@ class ForgotPasswordView(APIView):
                         "a password reset code has been sent."
                     )
                 },
-                status=status.HTTP_200_OK
+                status=status.HTTP_200_OK,
             )
 
         reset_code, created = (
@@ -294,23 +313,31 @@ class ForgotPasswordView(APIView):
 
         reset_code.generate_code()
 
-        send_mail(
-            subject="Reset your password",
-            message=(
-                f"Hello {user.first_name or user.username},\n\n"
-                "We received a request to reset your password.\n\n"
-                "Your password reset code is:\n\n"
-                f"{reset_code.code}\n\n"
-                "This code will expire in 10 minutes.\n\n"
-                "If you did not request a password reset, "
-                "you can safely ignore this email.\n\n"
-                "Thank you,\n"
-                "Customer Support"
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        try:
+            send_mail(
+                subject="Reset your password",
+                message=(
+                    f"Hello {user.first_name or user.username},\n\n"
+                    "We received a request to reset your password.\n\n"
+                    "Your password reset code is:\n\n"
+                    f"{reset_code.code}\n\n"
+                    "This code will expire in 10 minutes.\n\n"
+                    "If you did not request a password reset, "
+                    "you can safely ignore this email.\n\n"
+                    "Thank you,\n"
+                    "Customer Support"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+
+        except Exception as error:
+            print(
+                "PASSWORD RESET EMAIL ERROR:",
+                repr(error)
+            )
+            raise
 
         return Response(
             {
@@ -319,27 +346,25 @@ class ForgotPasswordView(APIView):
                     "a password reset code has been sent."
                 )
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
+
+
+# =========================================================
+# RESET PASSWORD
+# =========================================================
+
 @method_decorator(
-
     ratelimit(
-
         key="ip",
-
         rate="5/m",
-
         method="POST",
-
-        block=True
-
+        block=True,
     ),
-
-    name="dispatch"
-
-)    
+    name="dispatch",
+)
 class ResetPasswordView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ResetPasswordSerializer(
@@ -361,7 +386,7 @@ class ResetPasswordView(APIView):
                 {
                     "error": "Invalid password reset code"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -374,7 +399,7 @@ class ResetPasswordView(APIView):
                 {
                     "error": "Invalid password reset code"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not reset_code.is_valid():
@@ -382,7 +407,7 @@ class ResetPasswordView(APIView):
                 {
                     "error": "Password reset code has expired"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if reset_code.code != code:
@@ -390,7 +415,7 @@ class ResetPasswordView(APIView):
                 {
                     "error": "Invalid password reset code"
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -403,10 +428,11 @@ class ResetPasswordView(APIView):
                 {
                     "error": error.messages
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         user.set_password(new_password)
+
         user.save(
             update_fields=["password"]
         )
@@ -417,17 +443,25 @@ class ResetPasswordView(APIView):
             {
                 "message": "Password reset successfully"
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
 
-    
-         
+
+# =========================================================
+# CURRENT USER
+# =========================================================
+
 class MeView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
         return self.request.user
+
+
+# =========================================================
+# CUSTOMER PROFILE
+# =========================================================
 
 class CustomerProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -437,8 +471,13 @@ class CustomerProfileView(APIView):
             user=request.user
         )
 
-        serializer = CustomerProfileSerializer(profile)
-        return Response(serializer.data)
+        serializer = CustomerProfileSerializer(
+            profile
+        )
+
+        return Response(
+            serializer.data
+        )
 
     def patch(self, request):
         profile, created = CustomerProfile.objects.get_or_create(
@@ -448,13 +487,24 @@ class CustomerProfileView(APIView):
         serializer = CustomerProfileSerializer(
             profile,
             data=request.data,
-            partial=True
+            partial=True,
         )
 
-        serializer.is_valid(raise_exception=True)
+        serializer.is_valid(
+            raise_exception=True
+        )
+
         serializer.save()
 
-        return Response(serializer.data)
+        return Response(
+            serializer.data
+        )
+
+
+# =========================================================
+# ADMIN CUSTOMER LIST
+# =========================================================
+
 class AdminCustomerListView(generics.ListAPIView):
     serializer_class = AdminCustomerSerializer
     permission_classes = [IsAdminUser]
@@ -504,19 +554,35 @@ class AdminCustomerListView(generics.ListAPIView):
 
         return queryset
 
-    
-class AdminCustomerDetailView(generics.RetrieveUpdateAPIView):
+
+# =========================================================
+# ADMIN CUSTOMER DETAIL
+# =========================================================
+
+class AdminCustomerDetailView(
+    generics.RetrieveUpdateAPIView
+):
     serializer_class = AdminCustomerSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
-        return User.objects.filter(
-            is_staff=False
-        ).select_related(
-            "profile"
-        ).prefetch_related(
-            "orders"
-        )    
+        return (
+            User.objects
+            .filter(
+                is_staff=False
+            )
+            .select_related(
+                "profile"
+            )
+            .prefetch_related(
+                "orders"
+            )
+        )
+
+
+# =========================================================
+# ADMIN GUEST CUSTOMERS
+# =========================================================
 
 class AdminGuestCustomerListView(APIView):
     permission_classes = [IsAdminUser]
@@ -533,17 +599,21 @@ class AdminGuestCustomerListView(APIView):
             .exclude(
                 email=""
             )
-            .values("email")
+            .values(
+                "email"
+            )
             .annotate(
                 order_count=Count("id"),
                 total_spent=Sum(
                     "total_amount",
                     filter=Q(
                         payment_status="paid"
-                    )
+                    ),
                 ),
             )
-            .order_by("-order_count")
+            .order_by(
+                "-order_count"
+            )
         )
 
         results = []
@@ -569,4 +639,4 @@ class AdminGuestCustomerListView(APIView):
         return Response({
             "count": len(results),
             "results": results,
-        })    
+        })
