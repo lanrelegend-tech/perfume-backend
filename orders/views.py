@@ -1630,7 +1630,8 @@ class CreateOrderView(APIView):
             if delivery_method == "pickup":
 
                 shipping_rate = (
-                    ShippingRate.objects.filter(
+                    ShippingRate.objects
+                    .filter(
                         delivery_type="pickup",
                         is_active=True,
                     )
@@ -1642,11 +1643,16 @@ class CreateOrderView(APIView):
 
             else:
 
+                # Normalize the state entered
+                # by the customer.
+                normalized_state = state.strip()
+
                 shipping_rate = (
-                    ShippingRate.objects.filter(
-                        delivery_type__iexact="delivery",
-                        state__iexact=state,
+                    ShippingRate.objects
+                    .filter(
+                        delivery_type="state",
                         is_active=True,
+                        state__iexact=normalized_state,
                     )
                     .order_by(
                         "delivery_fee"
@@ -1889,7 +1895,7 @@ class CreateOrderView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-    
+        
 class MyOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
