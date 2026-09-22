@@ -1842,7 +1842,7 @@ class CreateOrderView(APIView):
                     product=item["product"],
                     variant=item["variant"],
                     quantity=item["quantity"],
-                    unit_price=item["unit_price"],
+                   product_price=unit_price,
                     subtotal=item["subtotal"],
                     product_name=item[
                         "product"
