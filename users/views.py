@@ -154,9 +154,17 @@ class VerifyEmailView(APIView):
         code = serializer.validated_data["code"]
 
         try:
-            user = User.objects.get(
-                email=email
-            )
+            user = User.objects.filter(
+    email=email
+).order_by("id").first()
+
+            if not user:
+              return Response(
+        {
+            "error": "Account not found"
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
 
         except User.DoesNotExist:
             return Response(
@@ -250,21 +258,17 @@ class ResendVerificationView(APIView):
                 email
             )
 
-            try:
-                user = User.objects.get(
-                    email=email
-                )
+            user = User.objects.filter(
+             email=email
+).order_by("id").first()
 
-            except User.DoesNotExist:
-                return Response(
-                    {
-                        "message": (
-                            "If an account exists with this email, "
-                            "a verification code has been sent."
-                        )
-                    },
-                    status=status.HTTP_200_OK,
-                )
+            if not user:
+             return Response(
+        {
+            "error": "No account found with this email address."
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
 
             try:
                 verification = (
