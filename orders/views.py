@@ -131,9 +131,10 @@ class AdminOrderDetailView(
                 "cancelled",
             ],
             "processing": [
-                "shipped",
-                "cancelled",
-            ],
+    "shipped",
+    "delivered",
+    "cancelled",
+],
             "shipped": [
                 "delivered",
             ],
