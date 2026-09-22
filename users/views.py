@@ -1,4 +1,5 @@
 from datetime import timedelta
+import random
 
 from django.conf import settings
 import resend
@@ -82,11 +83,15 @@ class RegisterView(generics.CreateAPIView):
         user = serializer.save()
 
         verification, created = EmailVerificationCode.objects.get_or_create(
-            user=user
-        )
+           user=user,
+            defaults={
+        "code": str(random.randint(100000, 999999)),
+        "expires_at": timezone.now() + timedelta(minutes=10),
+    },
+)
 
-        verification.generate_code()
-
+        if not created:
+          verification.generate_code()
         resend.api_key = settings.RESEND_API_KEY
 
         response = resend.Emails.send({
