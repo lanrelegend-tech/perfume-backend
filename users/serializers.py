@@ -1,9 +1,42 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 from .models import CustomerProfile
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 
+
+class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
+    username_field = "email"
+
+    def validate(self, attrs):
+        email = attrs.get("email", "").strip().lower()
+        password = attrs.get("password")
+
+        user = User.objects.filter(email__iexact=email).first()
+
+        if not user:
+            raise serializers.ValidationError(
+                "Invalid email or password."
+            )
+
+        if not user.check_password(password):
+            raise serializers.ValidationError(
+                "Invalid email or password."
+            )
+
+        if not user.is_active:
+            raise serializers.ValidationError(
+                "This account is inactive."
+            )
+
+        self.user = user
+
+        return super().validate({
+            "username": user.username,
+            "password": password,
+        })
+    
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
