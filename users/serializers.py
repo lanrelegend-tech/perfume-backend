@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.apps import apps
 from rest_framework import serializers
 from .models import CustomerProfile
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -73,6 +74,19 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data["password"],
             first_name=validated_data.get("first_name", ""),
             last_name=validated_data.get("last_name", ""),
+        )
+
+        # ---------------------------------
+        # CLAIM EXISTING GUEST ORDERS
+        # ---------------------------------
+
+        Order = apps.get_model("orders", "Order")
+
+        Order.objects.filter(
+            user__isnull=True,
+            email__iexact=user.email,
+        ).update(
+            user=user
         )
 
         return user
