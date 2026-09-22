@@ -44,6 +44,19 @@ class OrderSerializer(serializers.ModelSerializer):
     )
 
     status_history = serializers.SerializerMethodField()
+    coupon_discount_type = serializers.CharField(
+        source="coupon.discount_type",
+        read_only=True,
+        allow_null=True,
+    )
+
+    coupon_discount_value = serializers.DecimalField(
+        source="coupon.discount_value",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+        allow_null=True,
+    )
     coupon_code = serializers.CharField(
 
         source="coupon.code",
@@ -53,6 +66,7 @@ class OrderSerializer(serializers.ModelSerializer):
         allow_null=True,
 
     )
+    
 
     def get_status_history(self, obj):
         return [
@@ -98,6 +112,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "coupon",
             "coupon_code",
              "status_history",
+             "coupon_discount_type",
+             "coupon_discount_value",
         ]
 
         read_only_fields = [
@@ -117,6 +133,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "created_at",
             "updated_at",
+            "coupon_discount_type",
+            "coupon_discount_value",
         ]
 
 
@@ -142,6 +160,19 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             }
             for history in obj.status_history.all()
         ]
+    coupon_discount_type = serializers.CharField(
+    source="coupon.discount_type",
+    read_only=True,
+    allow_null=True,
+)
+
+    coupon_discount_value = serializers.DecimalField(
+    source="coupon.discount_value",
+    max_digits=10,
+    decimal_places=2,
+    read_only=True,
+    allow_null=True,
+)
     coupon_code = serializers.CharField(
         source="coupon.code",
         read_only=True,
@@ -176,6 +207,8 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
              "status_history",
+               "coupon_discount_type",
+              "coupon_discount_value",
         ]
 
         read_only_fields = [
@@ -193,6 +226,8 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "status_history",
+            "coupon_discount_type",
+            "coupon_discount_value",
         ]
 
 class RefundSerializer(serializers.ModelSerializer):
