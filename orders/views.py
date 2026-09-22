@@ -1816,7 +1816,6 @@ class CreateOrderView(APIView):
                 address=address,
                 city=city,
                 state=state,
-                country=country,
                 delivery_method=delivery_method,
                 pickup_address=(
                     pickup_address
@@ -1825,8 +1824,7 @@ class CreateOrderView(APIView):
                     else None
                 ),
                 coupon=coupon,
-                subtotal=products_total,
-                discount=discount,
+               
                 delivery_fee=delivery_fee,
                 total_amount=total_amount,
                 payment_status="pending",
