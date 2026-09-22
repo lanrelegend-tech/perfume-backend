@@ -43,54 +43,7 @@ class AdminDashboardView(APIView):
         return Response(
             get_dashboard_stats()
         )
-class AdminOrderListView(generics.ListAPIView):
-    serializer_class = OrderSerializer
-    permission_classes = [IsAdminUser]
-
-    def get_queryset(self):
-        queryset = Order.objects.all().prefetch_related(
-            "items",
-              "status_history"
-        ).select_related(
-            "user",
-            "coupon"
-        )
-
-        status_filter = self.request.query_params.get("status")
-        payment_status = self.request.query_params.get("payment_status")
-        search = self.request.query_params.get("search")
-
-        if status_filter:
-            queryset = queryset.filter(
-                status=status_filter
-            )
-
-        if payment_status:
-            queryset = queryset.filter(
-                payment_status=payment_status
-            )
-
-        if search:
-            queryset = queryset.filter(
-                Q(
-                    order_number__icontains=search
-                )
-                | Q(
-                    full_name__icontains=search
-                )
-                | Q(
-                    email__icontains=search
-                )
-                | Q(
-                    phone__icontains=search
-                )
-                | Q(
-                    tracking_number__icontains=search
-                )
-            )
-
-        return queryset
-
+    
 class AdminOrderDetailView(
     generics.RetrieveUpdateAPIView
 ):
@@ -111,8 +64,15 @@ class AdminOrderDetailView(
             )
         )
 
+    @transaction.atomic
     def perform_update(self, serializer):
-        order = self.get_object()
+
+        order = (
+            Order.objects
+            .select_for_update()
+            .prefetch_related("items")
+            .get(pk=self.get_object().pk)
+        )
 
         old_status = order.status
 
@@ -131,10 +91,10 @@ class AdminOrderDetailView(
                 "cancelled",
             ],
             "processing": [
-    "shipped",
-    "delivered",
-    "cancelled",
-],
+                "shipped",
+                "delivered",
+                "cancelled",
+            ],
             "shipped": [
                 "delivered",
             ],
@@ -163,21 +123,308 @@ class AdminOrderDetailView(
                 )
             })
 
+        # =====================================================
+        # CANCEL ORDER
+        # =====================================================
+
+        if (
+            old_status != "cancelled"
+            and new_status == "cancelled"
+        ):
+
+            # =================================================
+            # PAID ORDER
+            # =================================================
+
+            if order.payment_status == "paid":
+
+                if not order.payment_reference:
+                    from rest_framework.exceptions import ValidationError
+
+                    raise ValidationError({
+                        "status": (
+                            "This paid order cannot be cancelled "
+                            "because it has no payment reference."
+                        )
+                    })
+
+                if not settings.PAYSTACK_SECRET_KEY:
+                    from rest_framework.exceptions import ValidationError
+
+                    raise ValidationError({
+                        "status": (
+                            "Paystack secret key is not configured."
+                        )
+                    })
+
+                # ---------------------------------------------
+                # CREATE REFUND RECORD
+                # ---------------------------------------------
+
+                refund = Refund.objects.create(
+                    order=order,
+                    amount=order.total_amount,
+                    reason=(
+                        self.request.data.get(
+                            "reason",
+                            "Order cancelled by admin"
+                        )
+                        or "Order cancelled by admin"
+                    ).strip(),
+                    processed_by=self.request.user,
+                    status="pending",
+                )
+
+                # ---------------------------------------------
+                # PAYSTACK REFUND
+                # ---------------------------------------------
+
+                payload = {
+                    "transaction": order.payment_reference,
+                    "amount": int(
+                        order.total_amount * 100
+                    ),
+                }
+
+                try:
+                    response = requests.post(
+                        "https://api.paystack.co/refund",
+                        headers={
+                            "Authorization": (
+                                f"Bearer "
+                                f"{settings.PAYSTACK_SECRET_KEY}"
+                            ),
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=30,
+                    )
+
+                    data = response.json()
+
+                except requests.RequestException as e:
+
+                    refund.status = "failed"
+
+                    refund.save(
+                        update_fields=[
+                            "status",
+                            "updated_at",
+                        ]
+                    )
+
+                    from rest_framework.exceptions import ValidationError
+
+                    raise ValidationError({
+                        "status": (
+                            "Could not connect to Paystack. "
+                            "The order was not cancelled."
+                        )
+                    }) from e
+
+                if (
+                    not response.ok
+                    or not data.get("status")
+                ):
+
+                    refund.status = "failed"
+
+                    refund.save(
+                        update_fields=[
+                            "status",
+                            "updated_at",
+                        ]
+                    )
+
+                    from rest_framework.exceptions import ValidationError
+
+                    raise ValidationError({
+                        "status": (
+                            data.get(
+                                "message",
+                                "Refund request failed. "
+                                "The order was not cancelled."
+                            )
+                        )
+                    })
+
+                # ---------------------------------------------
+                # SAVE REFUND
+                # ---------------------------------------------
+
+                refund_data = data.get(
+                    "data",
+                    {}
+                )
+
+                refund.status = "processed"
+
+                refund.paystack_reference = (
+                    refund_data.get(
+                        "transaction_reference"
+                    )
+                    or refund_data.get(
+                        "reference"
+                    )
+                    or order.payment_reference
+                )
+
+                refund.save(
+                    update_fields=[
+                        "status",
+                        "paystack_reference",
+                        "updated_at",
+                    ]
+                )
+
+                # ---------------------------------------------
+                # RESTORE PRODUCT / VARIANT STOCK
+                # ---------------------------------------------
+
+                for item in order.items.all():
+
+                    # VARIANT PRODUCT
+                    if item.variant_id:
+
+                        variant = (
+                            ProductVariant.objects
+                            .select_for_update()
+                            .get(
+                                pk=item.variant_id
+                            )
+                        )
+
+                        variant.stock_quantity += (
+                            item.quantity
+                        )
+
+                        variant.in_stock = (
+                            variant.stock_quantity > 0
+                        )
+
+                        variant.save(
+                            update_fields=[
+                                "stock_quantity",
+                                "in_stock",
+                            ]
+                        )
+
+                    # NORMAL PRODUCT
+                    elif item.product_id:
+
+                        product = (
+                            Product.objects
+                            .select_for_update()
+                            .get(
+                                pk=item.product_id
+                            )
+                        )
+
+                        product.stock_quantity += (
+                            item.quantity
+                        )
+
+                        product.in_stock = (
+                            product.stock_quantity > 0
+                        )
+
+                        product.save(
+                            update_fields=[
+                                "stock_quantity",
+                                "in_stock",
+                            ]
+                        )
+
+                # ---------------------------------------------
+                # REVERSE COUPON USAGE
+                # ---------------------------------------------
+
+                if order.coupon_id:
+
+                    coupon = (
+                        Coupon.objects
+                        .select_for_update()
+                        .get(
+                            pk=order.coupon_id
+                        )
+                    )
+
+                    coupon.used_count = max(
+                        0,
+                        coupon.used_count - 1
+                    )
+
+                    coupon.save(
+                        update_fields=[
+                            "used_count"
+                        ]
+                    )
+
+                # ---------------------------------------------
+                # MARK PAYMENT AS REFUNDED
+                # ---------------------------------------------
+
+                order.payment_status = "refunded"
+
+            # =================================================
+            # CANCEL ORDER
+            # =================================================
+
+            order.status = "cancelled"
+
+            order.save(
+                update_fields=[
+                    "status",
+                    "payment_status",
+                    "updated_at",
+                ]
+            )
+
+            # ---------------------------------------------
+            # STATUS HISTORY
+            # ---------------------------------------------
+
+            OrderStatusHistory.objects.create(
+                order=order,
+                status="cancelled",
+                changed_by=self.request.user,
+                note=(
+                    "Order cancelled by admin"
+                    + (
+                        " and payment refunded"
+                        if order.payment_status == "refunded"
+                        else ""
+                    )
+                ),
+            )
+
+            return
+
+        # =====================================================
+        # NORMAL STATUS UPDATE
+        # =====================================================
+
         updated_order = serializer.save()
 
         new_status = updated_order.status
 
         if old_status != new_status:
+
             OrderStatusHistory.objects.create(
                 order=updated_order,
                 status=new_status,
                 changed_by=self.request.user,
             )
 
+        # =====================================================
+        # SHIPPED EMAIL
+        # =====================================================
+
         if (
             old_status != "shipped"
             and new_status == "shipped"
         ):
+
             from .email import (
                 send_order_shipped_email
             )
@@ -186,16 +433,23 @@ class AdminOrderDetailView(
                 send_order_shipped_email(
                     updated_order
                 )
+
             except Exception as e:
+
                 print(
                     "SHIPPED EMAIL ERROR:",
                     repr(e)
                 )
 
+        # =====================================================
+        # DELIVERED EMAIL
+        # =====================================================
+
         elif (
             old_status != "delivered"
             and new_status == "delivered"
         ):
+
             from .email import (
                 send_order_delivered_email
             )
@@ -204,11 +458,14 @@ class AdminOrderDetailView(
                 send_order_delivered_email(
                     updated_order
                 )
+
             except Exception as e:
+
                 print(
                     "DELIVERED EMAIL ERROR:",
                     repr(e)
                 )
+                
 
 class InitializePaymentView(APIView):
     permission_classes = [AllowAny]

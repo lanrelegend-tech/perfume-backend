@@ -129,3 +129,47 @@ We hope you enjoy your purchase.
     print("RESEND DELIVERED EMAIL RESPONSE:", response)
 
     return response
+
+def send_order_refund_email(order, refund):
+    subject = f"Order Cancelled & Refund Processed - {order.order_number}"
+
+    message = f"""
+Hello {order.full_name},
+
+Your ORENTEMIST order has been cancelled by our team.
+
+Order Number:
+{order.order_number}
+
+Refund Amount:
+₦{refund.amount:,.2f}
+
+Your refund has been successfully requested through our payment provider and will be returned to your original payment method.
+
+Refund Reference:
+{refund.paystack_reference or "N/A"}
+
+Reason:
+{refund.reason or "Order cancelled by admin"}
+
+Please note that the time it takes for the refunded funds to appear in your account may depend on your bank or payment provider.
+
+If you have any questions about this refund, please contact our support team.
+
+Thank you for shopping with ORENTEMIST.
+
+ORENTEMIST
+"""
+
+    resend.api_key = settings.RESEND_API_KEY
+
+    response = resend.Emails.send({
+        "from": "ORENTEMIST <onboarding@resend.dev>",
+        "to": [order.email],
+        "subject": subject,
+        "text": message,
+    })
+
+    print("RESEND REFUND EMAIL RESPONSE:", response)
+
+    return response
