@@ -242,8 +242,8 @@ class ResendVerificationView(APIView):
         except EmailVerificationCode.DoesNotExist:
             verification = EmailVerificationCode.objects.create(
                 user=user,
-                code="000000",
-                expires_at=timezone.now(),
+                code=str(random.randint(100000, 999999)),
+                expires_at=timezone.now() + timedelta(minutes=10),
             )
 
         if verification.verified_at:
@@ -257,21 +257,26 @@ class ResendVerificationView(APIView):
         verification.generate_code()
 
         try:
-            send_mail(
-                subject="Your new verification code",
-                message=(
+            resend.api_key = settings.RESEND_API_KEY
+
+            response = resend.Emails.send({
+                "from": "ORENTEMIST <onboarding@resend.dev>",
+                "to": [user.email],
+                "subject": "Your new ORENTEMIST verification code",
+                "text": (
                     f"Hello {user.first_name or user.username},\n\n"
-                    "Here is your new email verification code:\n\n"
+                    "Here is your new ORENTEMIST email verification code:\n\n"
                     f"{verification.code}\n\n"
                     "This code will expire in 10 minutes.\n\n"
-                    "If you did not request this code, "
-                    "you can ignore this email.\n\n"
+                    "If you did not request this code, you can safely ignore this email.\n\n"
                     "Thank you,\n"
-                    "Customer Support"
+                    "ORENTEMIST Customer Support"
                 ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
+            })
+
+            print(
+                "RESEND VERIFICATION EMAIL RESPONSE:",
+                response
             )
 
         except Exception as error:
@@ -279,7 +284,13 @@ class ResendVerificationView(APIView):
                 "RESEND VERIFICATION EMAIL ERROR:",
                 repr(error)
             )
-            raise
+
+            return Response(
+                {
+                    "error": "Unable to send verification email. Please try again."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         return Response(
             {
@@ -287,21 +298,7 @@ class ResendVerificationView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
-# =========================================================
-# FORGOT PASSWORD
-# =========================================================
-
-@method_decorator(
-    ratelimit(
-        key="ip",
-        rate="5/m",
-        method="POST",
-        block=True,
-    ),
-    name="dispatch",
-)
+    
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
 
