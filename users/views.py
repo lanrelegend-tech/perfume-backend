@@ -206,6 +206,9 @@ class VerifyEmailView(APIView):
 # =========================================================
 # RESEND VERIFICATION CODE
 # =========================================================
+# =========================================================
+# RESEND VERIFICATION CODE
+# =========================================================
 
 class ResendVerificationView(APIView):
     permission_classes = [AllowAny]
@@ -223,6 +226,7 @@ class ResendVerificationView(APIView):
             user = User.objects.get(
                 email=email
             )
+
         except User.DoesNotExist:
             return Response(
                 {
@@ -239,6 +243,7 @@ class ResendVerificationView(APIView):
                 EmailVerificationCode.objects
                 .get(user=user)
             )
+
         except EmailVerificationCode.DoesNotExist:
             verification = EmailVerificationCode.objects.create(
                 user=user,
@@ -254,9 +259,11 @@ class ResendVerificationView(APIView):
                 status=status.HTTP_200_OK,
             )
 
+        # Generate a fresh 6-digit code
         verification.generate_code()
 
         try:
+            # Resend API
             resend.api_key = settings.RESEND_API_KEY
 
             response = resend.Emails.send({
@@ -268,7 +275,8 @@ class ResendVerificationView(APIView):
                     "Here is your new ORENTEMIST email verification code:\n\n"
                     f"{verification.code}\n\n"
                     "This code will expire in 10 minutes.\n\n"
-                    "If you did not request this code, you can safely ignore this email.\n\n"
+                    "If you did not request this code, "
+                    "you can safely ignore this email.\n\n"
                     "Thank you,\n"
                     "ORENTEMIST Customer Support"
                 ),
@@ -287,7 +295,8 @@ class ResendVerificationView(APIView):
 
             return Response(
                 {
-                    "error": "Unable to send verification email. Please try again."
+                    "error": "Resend email failed",
+                    "detail": str(error),
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
