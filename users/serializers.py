@@ -4,8 +4,6 @@ from .models import CustomerProfile
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
-
-
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = "email"
 
@@ -30,13 +28,12 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "This account is inactive."
             )
 
-        self.user = user
+        refresh = self.get_token(user)
 
-        return super().validate({
-            "username": user.username,
-            "password": password,
-        })
-    
+        return {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        }
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
