@@ -44,6 +44,15 @@ class OrderSerializer(serializers.ModelSerializer):
     )
 
     status_history = serializers.SerializerMethodField()
+    coupon_code = serializers.CharField(
+
+        source="coupon.code",
+
+        read_only=True,
+
+        allow_null=True,
+
+    )
 
     def get_status_history(self, obj):
         return [
