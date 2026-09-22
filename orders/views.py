@@ -43,6 +43,25 @@ class AdminDashboardView(APIView):
         return Response(
             get_dashboard_stats()
         )
+
+class AdminOrderListView(generics.ListAPIView):
+    serializer_class = AdminOrderSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        return (
+            Order.objects
+            .all()
+            .select_related(
+                "user",
+                "coupon",
+            )
+            .prefetch_related(
+                "items",
+                "status_history",
+            )
+            .order_by("-created_at")
+        )
     
 class AdminOrderDetailView(
     generics.RetrieveUpdateAPIView
@@ -97,6 +116,7 @@ class AdminOrderDetailView(
             ],
             "shipped": [
                 "delivered",
+                "cancelled",
             ],
             "delivered": [],
             "cancelled": [],
@@ -106,6 +126,10 @@ class AdminOrderDetailView(
             old_status,
             []
         )
+
+        # ---------------------------------------------
+        # CHECK STATUS TRANSITION
+        # ---------------------------------------------
 
         if (
             new_status != old_status
@@ -138,9 +162,13 @@ class AdminOrderDetailView(
 
             if order.payment_status == "paid":
 
-                if not order.payment_reference:
-                    from rest_framework.exceptions import ValidationError
+                from rest_framework.exceptions import ValidationError
 
+                # ---------------------------------------------
+                # REQUIRE PAYMENT REFERENCE
+                # ---------------------------------------------
+
+                if not order.payment_reference:
                     raise ValidationError({
                         "status": (
                             "This paid order cannot be cancelled "
@@ -148,12 +176,34 @@ class AdminOrderDetailView(
                         )
                     })
 
-                if not settings.PAYSTACK_SECRET_KEY:
-                    from rest_framework.exceptions import ValidationError
+                # ---------------------------------------------
+                # REQUIRE PAYSTACK SECRET KEY
+                # ---------------------------------------------
 
+                if not settings.PAYSTACK_SECRET_KEY:
                     raise ValidationError({
                         "status": (
                             "Paystack secret key is not configured."
+                        )
+                    })
+
+                # ---------------------------------------------
+                # PREVENT DUPLICATE REFUND
+                # ---------------------------------------------
+
+                existing_refund = (
+                    Refund.objects
+                    .filter(
+                        order=order,
+                        status="processed"
+                    )
+                    .first()
+                )
+
+                if existing_refund:
+                    raise ValidationError({
+                        "status": (
+                            "This order has already been refunded."
                         )
                     })
 
@@ -180,7 +230,9 @@ class AdminOrderDetailView(
                 # ---------------------------------------------
 
                 payload = {
-                    "transaction": order.payment_reference,
+                    "transaction": (
+                        order.payment_reference
+                    ),
                     "amount": int(
                         order.total_amount * 100
                     ),
@@ -213,14 +265,16 @@ class AdminOrderDetailView(
                         ]
                     )
 
-                    from rest_framework.exceptions import ValidationError
-
                     raise ValidationError({
                         "status": (
                             "Could not connect to Paystack. "
                             "The order was not cancelled."
                         )
                     }) from e
+
+                # ---------------------------------------------
+                # CHECK PAYSTACK RESPONSE
+                # ---------------------------------------------
 
                 if (
                     not response.ok
@@ -236,8 +290,6 @@ class AdminOrderDetailView(
                         ]
                     )
 
-                    from rest_framework.exceptions import ValidationError
-
                     raise ValidationError({
                         "status": (
                             data.get(
@@ -249,7 +301,7 @@ class AdminOrderDetailView(
                     })
 
                 # ---------------------------------------------
-                # SAVE REFUND
+                # SAVE PAYSTACK REFUND
                 # ---------------------------------------------
 
                 refund_data = data.get(
@@ -283,7 +335,10 @@ class AdminOrderDetailView(
 
                 for item in order.items.all():
 
+                    # -----------------------------------------
                     # VARIANT PRODUCT
+                    # -----------------------------------------
+
                     if item.variant_id:
 
                         variant = (
@@ -309,7 +364,10 @@ class AdminOrderDetailView(
                             ]
                         )
 
+                    # -----------------------------------------
                     # NORMAL PRODUCT
+                    # -----------------------------------------
+
                     elif item.product_id:
 
                         product = (
@@ -349,6 +407,7 @@ class AdminOrderDetailView(
                         )
                     )
 
+                    # Reduce total usage count
                     coupon.used_count = max(
                         0,
                         coupon.used_count - 1
@@ -360,6 +419,15 @@ class AdminOrderDetailView(
                         ]
                     )
 
+                    # Remove this customer from the
+                    # coupon's used_by list so the
+                    # customer can use the coupon again
+                    # after a cancelled/refunded order.
+                    if order.user:
+                        coupon.used_by.remove(
+                            order.user
+                        )
+
                 # ---------------------------------------------
                 # MARK PAYMENT AS REFUNDED
                 # ---------------------------------------------
@@ -367,7 +435,7 @@ class AdminOrderDetailView(
                 order.payment_status = "refunded"
 
             # =================================================
-            # CANCEL ORDER
+            # MARK ORDER AS CANCELLED
             # =================================================
 
             order.status = "cancelled"
@@ -398,6 +466,35 @@ class AdminOrderDetailView(
                 ),
             )
 
+            # ---------------------------------------------
+            # SEND REFUND EMAIL AFTER DATABASE COMMIT
+            # ---------------------------------------------
+
+            if order.payment_status == "refunded":
+
+                def send_refund_email_after_commit():
+
+                    try:
+                        from .email import (
+                            send_order_refund_email
+                        )
+
+                        send_order_refund_email(
+                            order,
+                            refund
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            "REFUND EMAIL ERROR:",
+                            repr(e)
+                        )
+
+                transaction.on_commit(
+                    send_refund_email_after_commit
+                )
+
             return
 
         # =====================================================
@@ -407,6 +504,10 @@ class AdminOrderDetailView(
         updated_order = serializer.save()
 
         new_status = updated_order.status
+
+        # ---------------------------------------------
+        # STATUS HISTORY
+        # ---------------------------------------------
 
         if old_status != new_status:
 
@@ -430,6 +531,7 @@ class AdminOrderDetailView(
             )
 
             try:
+
                 send_order_shipped_email(
                     updated_order
                 )
@@ -455,6 +557,7 @@ class AdminOrderDetailView(
             )
 
             try:
+
                 send_order_delivered_email(
                     updated_order
                 )
@@ -465,7 +568,7 @@ class AdminOrderDetailView(
                     "DELIVERED EMAIL ERROR:",
                     repr(e)
                 )
-                
+
 
 class InitializePaymentView(APIView):
     permission_classes = [AllowAny]
