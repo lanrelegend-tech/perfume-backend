@@ -1296,40 +1296,12 @@ class CreateOrderView(APIView):
     def post(self, request):
 
         # ---------------------------------
-        # GET CART
+        # GET BROWSER CART
         # ---------------------------------
 
-        if request.user.is_authenticated:
-            cart = Cart.objects.filter(
-                user=request.user
-            ).prefetch_related(
-                "items__product",
-                "items__variant"
-            ).first()
+        browser_cart = request.data.get("cart_items")
 
-        else:
-            guest_session_id = request.headers.get(
-                "X-Guest-Session-ID"
-            )
-
-            if not guest_session_id:
-                return Response(
-                    {
-                        "error": (
-                            "Guest session ID is required"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            cart = Cart.objects.filter(
-                session_id=guest_session_id
-            ).prefetch_related(
-                "items__product",
-                "items__variant"
-            ).first()
-
-        if not cart or not cart.items.exists():
+        if not isinstance(browser_cart, list) or not browser_cart:
             return Response(
                 {"error": "Your cart is empty"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1360,6 +1332,7 @@ class CreateOrderView(APIView):
             address = customer.get("address")
             city = customer.get("city")
             state = customer.get("state")
+            country = customer.get("country")
         else:
             full_name = request.data.get("full_name")
             phone = request.data.get("phone")
@@ -1367,6 +1340,7 @@ class CreateOrderView(APIView):
             address = request.data.get("address")
             city = request.data.get("city")
             state = request.data.get("state")
+            country = request.data.get("country")
 
         delivery_method = request.data.get(
             "delivery_method",
@@ -1398,9 +1372,7 @@ class CreateOrderView(APIView):
             if not value:
                 return Response(
                     {
-                        "error": (
-                            f"{field} is required"
-                        )
+                        "error": f"{field} is required"
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
@@ -1415,27 +1387,111 @@ class CreateOrderView(APIView):
         ]:
             return Response(
                 {
-                    "error": (
-                        "Invalid delivery method"
-                    )
+                    "error": "Invalid delivery method"
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         # ---------------------------------
-        # CALCULATE PRODUCTS TOTAL
+        # VALIDATE BROWSER CART
         # ---------------------------------
 
+        from products.models import Product
+
         products_total = Decimal("0.00")
+        validated_items = []
 
-        for cart_item in cart.items.all():
+        for browser_item in browser_cart:
 
-            product = cart_item.product
-            variant = cart_item.variant
+            try:
+                product_id = int(
+                    browser_item.get("product_id")
+                )
+
+                quantity = int(
+                    browser_item.get("quantity")
+                )
+
+            except (TypeError, ValueError):
+
+                return Response(
+                    {
+                        "error": "Invalid cart item."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if quantity <= 0:
+                return Response(
+                    {
+                        "error": "Cart quantity must be greater than zero."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # ---------------------------------
+            # GET PRODUCT FROM DATABASE
+            # ---------------------------------
+
+            try:
+                product = Product.objects.get(
+                    id=product_id
+                )
+
+            except Product.DoesNotExist:
+
+                return Response(
+                    {
+                        "error": (
+                            f"Product with ID "
+                            f"{product_id} was not found."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # ---------------------------------
+            # VARIANT
+            # ---------------------------------
+
+            variant_id = browser_item.get(
+                "variant_id"
+            )
+
+            variant = None
+
+            if variant_id:
+
+                try:
+                    variant = ProductVariant.objects.get(
+                        id=int(variant_id),
+                        product=product
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                    ProductVariant.DoesNotExist
+                ):
+
+                    return Response(
+                        {
+                            "error": (
+                                f"Invalid variant "
+                                f"for {product.name}."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # ---------------------------------
+            # CHECK VARIANT STOCK
+            # ---------------------------------
 
             if variant:
 
                 if not variant.in_stock:
+
                     return Response(
                         {
                             "error": (
@@ -1447,10 +1503,8 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                if (
-                    cart_item.quantity
-                    > variant.stock_quantity
-                ):
+                if quantity > variant.stock_quantity:
+
                     return Response(
                         {
                             "error": (
@@ -1462,28 +1516,29 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                products_total += (
-                    variant.price
-                    * cart_item.quantity
-                )
+                item_price = variant.price
+                item_size = variant.size
+
+            # ---------------------------------
+            # PRODUCT WITHOUT VARIANT
+            # ---------------------------------
 
             else:
 
                 if not product.in_stock:
+
                     return Response(
                         {
                             "error": (
                                 f"{product.name} "
-                                "is out of stock"
+                                f"is out of stock"
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                if (
-                    cart_item.quantity
-                    > product.stock_quantity
-                ):
+                if quantity > product.stock_quantity:
+
                     return Response(
                         {
                             "error": (
@@ -1494,10 +1549,30 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                products_total += (
-                    product.price
-                    * cart_item.quantity
-                )
+                item_price = product.price
+                item_size = getattr(
+                    product,
+                    "size",
+                    ""
+                ) or ""
+
+            # ---------------------------------
+            # CALCULATE TOTAL FROM DATABASE PRICE
+            # ---------------------------------
+
+            products_total += (
+                item_price * quantity
+            )
+
+            validated_items.append(
+                {
+                    "product": product,
+                    "variant": variant,
+                    "quantity": quantity,
+                    "price": item_price,
+                    "size": item_size,
+                }
+            )
 
         # ---------------------------------
         # SHIPPING
@@ -1509,69 +1584,61 @@ class CreateOrderView(APIView):
         if delivery_method == "delivery":
 
             shipping_rate = ShippingRate.objects.filter(
-                state__iexact=state.strip(),
-                is_active=True
+                state__iexact=str(state).strip(),
+                is_active=True,
             ).first()
 
             if not shipping_rate:
+
                 return Response(
                     {
                         "error": (
-                            "Delivery is not available "
-                            f"to {state}"
+                            "We currently do not have "
+                            "a delivery rate for this state."
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            delivery_fee = shipping_rate.delivery_fee
+            delivery_fee = Decimal(
+                str(
+                    shipping_rate.delivery_fee or 0
+                )
+            )
 
         else:
 
             shipping_rate = ShippingRate.objects.filter(
                 delivery_type="pickup",
-                is_active=True
+                is_active=True,
             ).first()
 
             if not shipping_rate:
+
                 return Response(
                     {
-                        "error": (
-                            "Pickup is currently "
-                            "not available"
-                        )
+                        "error": "Pickup is currently unavailable."
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            pickup_address = (
-                shipping_rate.pickup_address
-                or pickup_address
+            delivery_fee = Decimal(
+                str(
+                    shipping_rate.delivery_fee or 0
+                )
             )
 
             if not pickup_address:
-                return Response(
-                    {
-                        "error": (
-                            "Pickup address is not "
-                            "configured"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
+                pickup_address = (
+                    shipping_rate.pickup_address or ""
                 )
-
-            delivery_fee = Decimal("0.00")
-
-            address = ""
-            city = ""
-            state = ""
 
         # ---------------------------------
         # COUPON
         # ---------------------------------
 
-        discount_amount = Decimal("0.00")
         coupon = None
+        discount_amount = Decimal("0.00")
 
         coupon_code = request.data.get(
             "coupon_code"
@@ -1579,16 +1646,21 @@ class CreateOrderView(APIView):
 
         if coupon_code:
 
-            try:
-                coupon = Coupon.objects.get(
-                    code__iexact=coupon_code.strip()
-                )
+            coupon_code = str(
+                coupon_code
+            ).strip()
 
-            except Coupon.DoesNotExist:
+            coupon = Coupon.objects.filter(
+                code__iexact=coupon_code,
+                is_active=True,
+            ).first()
+
+            if not coupon:
+
                 return Response(
                     {
                         "error": (
-                            "Invalid coupon code"
+                            "Invalid or inactive coupon."
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST
@@ -1596,70 +1668,30 @@ class CreateOrderView(APIView):
 
             from django.utils import timezone
 
-            if not coupon.is_active:
-                return Response(
-                    {
-                        "error": (
-                            "This coupon is inactive"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            now = timezone.now()
 
             if (
                 coupon.expires_at
-                and coupon.expires_at <= timezone.now()
+                and coupon.expires_at < now
             ):
+
                 return Response(
                     {
-                        "error": (
-                            "This coupon has expired"
-                        )
+                        "error": "This coupon has expired."
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             if (
                 coupon.usage_limit is not None
-                and coupon.used_count
-                >= coupon.usage_limit
+                and coupon.used_count >= coupon.usage_limit
             ):
+
                 return Response(
                     {
                         "error": (
                             "This coupon has reached "
-                            "its usage limit"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # Only check used_by for logged-in users.
-            if (
-                request.user.is_authenticated
-                and coupon.used_by.filter(
-                    id=request.user.id
-                ).exists()
-            ):
-                return Response(
-                    {
-                        "error": (
-                            "You have already used "
-                            "this coupon"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if (
-                products_total
-                < coupon.minimum_order_amount
-            ):
-                return Response(
-                    {
-                        "error": (
-                            f"Minimum order amount is "
-                            f"₦{coupon.minimum_order_amount:,.2f}"
+                            "its usage limit."
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST
@@ -1669,19 +1701,20 @@ class CreateOrderView(APIView):
 
                 discount_amount = (
                     products_total
-                    * coupon.discount_value
+                    * Decimal(
+                        str(
+                            coupon.discount_value
+                        )
+                    )
                     / Decimal("100")
                 )
 
-                if coupon.maximum_discount is not None:
-                    discount_amount = min(
-                        discount_amount,
-                        coupon.maximum_discount
-                    )
-
             else:
-                discount_amount = (
-                    coupon.discount_value
+
+                discount_amount = Decimal(
+                    str(
+                        coupon.discount_value
+                    )
                 )
 
             discount_amount = min(
@@ -1693,7 +1726,8 @@ class CreateOrderView(APIView):
         # FINAL TOTAL
         # ---------------------------------
 
-        total = (
+        total_amount = max(
+            Decimal("0.00"),
             products_total
             - discount_amount
             + delivery_fee
@@ -1709,80 +1743,58 @@ class CreateOrderView(APIView):
                 if request.user.is_authenticated
                 else None
             ),
-            total_amount=total,
-            delivery_fee=delivery_fee,
-            coupon=coupon,
-            discount_amount=discount_amount,
-            delivery_method=delivery_method,
-            pickup_address=(
-                pickup_address
-                if delivery_method == "pickup"
-                else ""
-            ),
             full_name=full_name,
-            phone=phone,
             email=email,
+            phone=phone,
             address=address or "",
             city=city or "",
             state=state or "",
-            notes=request.data.get(
-                "notes",
-                ""
-            ),
-        )
-
-        # ---------------------------------
-        # ORDER STATUS HISTORY
-        # ---------------------------------
-
-        OrderStatusHistory.objects.create(
-            order=order,
+            country=country or "Nigeria",
+            delivery_method=delivery_method,
+            pickup_address=pickup_address,
+            coupon=coupon,
+            subtotal=products_total,
+            discount_amount=discount_amount,
+            delivery_fee=delivery_fee,
+            total_amount=total_amount,
+            payment_status="pending",
             status="pending",
-            changed_by=(
-                request.user
-                if request.user.is_authenticated
-                else None
-            ),
-            note="Order created",
         )
 
         # ---------------------------------
         # CREATE ORDER ITEMS
         # ---------------------------------
 
-        for cart_item in cart.items.all():
+        for item in validated_items:
 
-            product = cart_item.product
-            variant = cart_item.variant
-
-            if variant:
-                item_price = variant.price
-                variant_size = variant.size
-            else:
-                item_price = product.price
-                variant_size = ""
+            product = item["product"]
+            variant = item["variant"]
+            quantity = item["quantity"]
+            item_price = item["price"]
+            item_size = item["size"]
 
             OrderItem.objects.create(
                 order=order,
                 product=product,
                 variant=variant,
                 product_name=product.name,
-                product_brand=product.brand,
-                variant_size=variant_size,
-                product_price=item_price,
-                quantity=cart_item.quantity,
+                variant_size=item_size,
+                quantity=quantity,
+                price=item_price,
             )
 
         # ---------------------------------
         # RESPONSE
         # ---------------------------------
 
-        serializer = OrderSerializer(order)
-
         return Response(
-            serializer.data,
+            {
+                "message": "Order created successfully",
+                "order": OrderSerializer(order).data,
+            },
             status=status.HTTP_201_CREATED
         )
+    
 class MyOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
