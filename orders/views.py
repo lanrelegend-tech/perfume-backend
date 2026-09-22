@@ -1591,6 +1591,10 @@ class CreateOrderView(APIView):
                         or ""
                     )
 
+                # ---------------------------------
+                # CALCULATE ITEM PRICE
+                # ---------------------------------
+
                 item_price = Decimal(
                     str(item_price)
                 )
@@ -1819,12 +1823,10 @@ class CreateOrderView(APIView):
                 delivery_method=delivery_method,
                 pickup_address=(
                     pickup_address
-                    if delivery_method
-                    == "pickup"
+                    if delivery_method == "pickup"
                     else None
                 ),
                 coupon=coupon,
-               
                 delivery_fee=delivery_fee,
                 total_amount=total_amount,
                 payment_status="pending",
@@ -1842,7 +1844,7 @@ class CreateOrderView(APIView):
                     product=item["product"],
                     variant=item["variant"],
                     quantity=item["quantity"],
-                   product_price=unit_price,
+                    product_price=item["unit_price"],
                     subtotal=item["subtotal"],
                     product_name=item[
                         "product"
