@@ -7,6 +7,7 @@ import uuid
 import requests
 from cart.models import Cart
 from products.models import ProductVariant, Product
+from django.utils import timezone
 
 from django.db import transaction
 from django.db.models import Q
@@ -1288,310 +1289,527 @@ class OrderTrackingView(generics.RetrieveAPIView):
             "items",
             "status_history"
         )
-    
 class CreateOrderView(APIView):
     permission_classes = [AllowAny]
 
     @transaction.atomic
-def post(self, request):
-    try:
-        browser_cart = request.data.get("cart_items")
+    def post(self, request):
+        try:
+            browser_cart = request.data.get("cart_items")
 
-        if not isinstance(browser_cart, list) or not browser_cart:
-            return Response(
-                {"error": "Cart is empty or invalid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        customer = request.data.get("customer") or {}
-
-        first_name = str(customer.get("firstName") or "").strip()
-        last_name = str(customer.get("lastName") or "").strip()
-
-        full_name = f"{first_name} {last_name}".strip()
-
-        email = str(customer.get("email") or "").strip()
-        phone = str(customer.get("phone") or "").strip()
-        address = str(customer.get("address") or "").strip()
-        city = str(customer.get("city") or "").strip()
-        state = str(customer.get("state") or "").strip()
-        country = str(customer.get("country") or "Nigeria").strip()
-
-        if not full_name:
-            return Response(
-                {"error": "Customer name is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not email:
-            return Response(
-                {"error": "Customer email is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        delivery_method = request.data.get("delivery_method")
-
-        if delivery_method not in ["delivery", "pickup"]:
-            return Response(
-                {"error": "Invalid delivery method."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        pickup_address = request.data.get("pickup_address")
-
-        products_total = Decimal("0.00")
-        order_items = []
-
-        for browser_item in browser_cart:
-
-            product_id = browser_item.get("product_id")
-            quantity = browser_item.get("quantity")
-
-            try:
-                product_id = int(product_id)
-                quantity = int(quantity)
-            except (TypeError, ValueError):
+            if not isinstance(browser_cart, list) or not browser_cart:
                 return Response(
-                    {
-                        "error": "Invalid cart item.",
-                        "item": browser_item,
-                    },
+                    {"error": "Cart is empty or invalid."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if quantity <= 0:
+            customer = request.data.get("customer") or {}
+
+            first_name = str(
+                customer.get("firstName") or ""
+            ).strip()
+
+            last_name = str(
+                customer.get("lastName") or ""
+            ).strip()
+
+            full_name = f"{first_name} {last_name}".strip()
+
+            email = str(
+                customer.get("email") or ""
+            ).strip()
+
+            phone = str(
+                customer.get("phone") or ""
+            ).strip()
+
+            address = str(
+                customer.get("address") or ""
+            ).strip()
+
+            city = str(
+                customer.get("city") or ""
+            ).strip()
+
+            state = str(
+                customer.get("state") or ""
+            ).strip()
+
+            country = str(
+                customer.get("country") or "Nigeria"
+            ).strip()
+
+            if not full_name:
                 return Response(
-                    {"error": "Quantity must be greater than zero."},
+                    {"error": "Customer name is required."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            try:
-                product = Product.objects.get(id=product_id)
-            except Product.DoesNotExist:
+            if not email:
                 return Response(
-                    {
-                        "error": f"Product with ID {product_id} does not exist."
-                    },
+                    {"error": "Customer email is required."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            variant = None
-            variant_id = browser_item.get("variant_id")
+            delivery_method = request.data.get(
+                "delivery_method"
+            )
 
-            if variant_id:
+            if delivery_method not in [
+                "delivery",
+                "pickup",
+            ]:
+                return Response(
+                    {"error": "Invalid delivery method."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if delivery_method == "delivery":
+                if not address or not city or not state:
+                    return Response(
+                        {
+                            "error": (
+                                "Delivery address, city and "
+                                "state are required."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            pickup_address = (
+                request.data.get("pickup_address")
+                or ""
+            )
+
+            products_total = Decimal("0.00")
+
+            order_items = []
+
+            # ---------------------------------
+            # VALIDATE BROWSER CART
+            # ---------------------------------
+
+            for browser_item in browser_cart:
+
+                if not isinstance(
+                    browser_item,
+                    dict
+                ):
+                    return Response(
+                        {"error": "Invalid cart item."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                product_id = browser_item.get(
+                    "product_id"
+                )
+
+                quantity = browser_item.get(
+                    "quantity"
+                )
+
                 try:
-                    variant_id = int(variant_id)
+                    product_id = int(product_id)
+                    quantity = int(quantity)
 
-                    variant = ProductVariant.objects.get(
-                        id=variant_id,
-                        product=product,
-                    )
-
-                except (TypeError, ValueError):
+                except (
+                    TypeError,
+                    ValueError,
+                ):
                     return Response(
-                        {"error": "Invalid variant ID."},
+                        {
+                            "error": "Invalid cart item.",
+                            "item": browser_item,
+                        },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-                except ProductVariant.DoesNotExist:
+                if quantity <= 0:
                     return Response(
                         {
                             "error": (
-                                f"Variant {variant_id} "
-                                f"does not belong to product {product_id}."
+                                "Quantity must be greater "
+                                "than zero."
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-            if variant:
-                if not variant.in_stock:
+                # ---------------------------------
+                # GET PRODUCT FROM DATABASE
+                # ---------------------------------
+
+                try:
+                    product = Product.objects.get(
+                        id=product_id
+                    )
+
+                except Product.DoesNotExist:
                     return Response(
                         {
                             "error": (
-                                f"{product.name} "
-                                f"({variant.size}) is out of stock."
+                                f"Product with ID "
+                                f"{product_id} does not exist."
                             )
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-                if quantity > variant.stock_quantity:
-                    return Response(
-                        {
-                            "error": (
-                                f"Only {variant.stock_quantity} "
-                                f"units of {product.name} "
-                                f"({variant.size}) are available."
+                # ---------------------------------
+                # CHECK VARIANT
+                # ---------------------------------
+
+                variant = None
+
+                variant_id = browser_item.get(
+                    "variant_id"
+                )
+
+                if variant_id not in [
+                    None,
+                    "",
+                    0,
+                    "0",
+                ]:
+
+                    try:
+                        variant_id = int(
+                            variant_id
+                        )
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    "Invalid variant ID."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    try:
+                        variant = (
+                            ProductVariant.objects.get(
+                                id=variant_id,
+                                product=product,
                             )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    except ProductVariant.DoesNotExist:
+                        return Response(
+                            {
+                                "error": (
+                                    f"Variant {variant_id} "
+                                    f"does not belong to "
+                                    f"product {product_id}."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                # ---------------------------------
+                # VARIANT STOCK
+                # ---------------------------------
+
+                if variant:
+
+                    if not variant.in_stock:
+                        return Response(
+                            {
+                                "error": (
+                                    f"{product.name} "
+                                    f"({variant.size}) "
+                                    "is out of stock."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if (
+                        quantity
+                        > variant.stock_quantity
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    f"Only "
+                                    f"{variant.stock_quantity} "
+                                    f"units of "
+                                    f"{product.name} "
+                                    f"({variant.size}) "
+                                    "are available."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    item_price = variant.price
+
+                    item_size = variant.size
+
+                # ---------------------------------
+                # PRODUCT STOCK
+                # ---------------------------------
+
+                else:
+
+                    if not product.in_stock:
+                        return Response(
+                            {
+                                "error": (
+                                    f"{product.name} "
+                                    "is out of stock."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if (
+                        quantity
+                        > product.stock_quantity
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    f"Only "
+                                    f"{product.stock_quantity} "
+                                    f"units of "
+                                    f"{product.name} "
+                                    "are available."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    item_price = product.price
+
+                    item_size = (
+                        browser_item.get("size")
+                        or ""
                     )
 
-                item_price = variant.price
-                item_size = variant.size
+                item_price = Decimal(
+                    str(item_price)
+                )
+
+                item_subtotal = (
+                    item_price * quantity
+                )
+
+                products_total += item_subtotal
+
+                order_items.append(
+                    {
+                        "product": product,
+                        "variant": variant,
+                        "quantity": quantity,
+                        "unit_price": item_price,
+                        "subtotal": item_subtotal,
+                        "size": item_size,
+                    }
+                )
+
+            # ---------------------------------
+            # SHIPPING
+            # ---------------------------------
+
+            shipping_rate = None
+
+            delivery_fee = Decimal(
+                "0.00"
+            )
+
+            if delivery_method == "pickup":
+
+                shipping_rate = (
+                    ShippingRate.objects.filter(
+                        delivery_type="pickup",
+                        is_active=True,
+                    )
+                    .order_by(
+                        "delivery_fee"
+                    )
+                    .first()
+                )
 
             else:
-                if not product.in_stock:
-                    return Response(
-                        {
-                            "error": f"{product.name} is out of stock."
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
+
+                shipping_rate = (
+                    ShippingRate.objects.filter(
+                        delivery_type__iexact="delivery",
+                        state__iexact=state,
+                        is_active=True,
                     )
-
-                if quantity > product.stock_quantity:
-                    return Response(
-                        {
-                            "error": (
-                                f"Only {product.stock_quantity} "
-                                f"units of {product.name} are available."
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
+                    .order_by(
+                        "delivery_fee"
                     )
-
-                item_price = product.price
-                item_size = product.size
-
-            item_total = item_price * quantity
-            products_total += item_total
-
-            order_items.append(
-                {
-                    "product": product,
-                    "variant": variant,
-                    "product_name": product.name,
-                    "variant_size": item_size,
-                    "quantity": quantity,
-                    "price": item_price,
-                }
-            )
-
-        # --------------------------------
-        # SHIPPING
-        # --------------------------------
-
-        delivery_fee = Decimal("0.00")
-
-        if delivery_method == "delivery":
-
-            shipping_rate = (
-                ShippingRate.objects
-                .filter(
-                    state__iexact=state,
-                    delivery_type="delivery",
-                    is_active=True,
-                )
-                .first()
-            )
-
-            if shipping_rate:
-                delivery_fee = Decimal(
-                    str(shipping_rate.delivery_fee or 0)
+                    .first()
                 )
 
-        else:
-
-            shipping_rate = (
-                ShippingRate.objects
-                .filter(
-                    delivery_type="pickup",
-                    is_active=True,
-                )
-                .first()
-            )
-
-            if shipping_rate:
-                delivery_fee = Decimal(
-                    str(shipping_rate.delivery_fee or 0)
-                )
-
-                if not pickup_address:
-                    pickup_address = shipping_rate.pickup_address
-
-        # --------------------------------
-        # COUPON
-        # --------------------------------
-
-        coupon = None
-        discount_amount = Decimal("0.00")
-
-        coupon_code = request.data.get("coupon_code")
-
-        if coupon_code:
-
-            coupon = (
-                Coupon.objects
-                .filter(
-                    code__iexact=str(coupon_code).strip(),
-                    is_active=True,
-                )
-                .first()
-            )
-
-            if not coupon:
+            if not shipping_rate:
                 return Response(
-                    {"error": "Invalid coupon code."},
+                    {
+                        "error": (
+                            "No shipping rate is "
+                            "available for the selected "
+                            "delivery method and state."
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if coupon.expires_at:
-                from django.utils import timezone
+            delivery_fee = Decimal(
+                str(
+                    shipping_rate.delivery_fee
+                    or 0
+                )
+            )
 
-                if coupon.expires_at < timezone.now():
-                    return Response(
-                        {"error": "This coupon has expired."},
-                        status=status.HTTP_400_BAD_REQUEST,
+            if delivery_method == "pickup":
+
+                pickup_address = (
+                    shipping_rate.pickup_address
+                    or pickup_address
+                )
+
+            # ---------------------------------
+            # COUPON
+            # ---------------------------------
+
+            coupon = None
+
+            discount = Decimal(
+                "0.00"
+            )
+
+            coupon_code = request.data.get(
+                "coupon_code"
+            )
+
+            if coupon_code:
+
+                coupon_code = str(
+                    coupon_code
+                ).strip()
+
+                if coupon_code:
+
+                    try:
+                        coupon = (
+                            Coupon.objects.get(
+                                code__iexact=coupon_code
+                            )
+                        )
+
+                    except Coupon.DoesNotExist:
+                        return Response(
+                            {
+                                "error": (
+                                    "Invalid coupon code."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if not coupon.is_active:
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon is "
+                                    "no longer active."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if (
+                        coupon.expires_at
+                        and coupon.expires_at
+                        <= timezone.now()
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon has expired."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if (
+                        coupon.usage_limit
+                        is not None
+                        and coupon.used_count
+                        >= coupon.usage_limit
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon has "
+                                    "reached its usage limit."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if (
+                        coupon.discount_type
+                        == "percentage"
+                    ):
+
+                        discount = (
+                            products_total
+                            * Decimal(
+                                str(
+                                    coupon.discount_value
+                                )
+                            )
+                            / Decimal("100")
+                        )
+
+                    else:
+
+                        discount = Decimal(
+                            str(
+                                coupon.discount_value
+                            )
+                        )
+
+                    discount = min(
+                        discount,
+                        products_total,
                     )
 
-            if (
-                coupon.usage_limit is not None
-                and coupon.times_used >= coupon.usage_limit
-            ):
-                return Response(
-                    {"error": "This coupon has reached its usage limit."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            # ---------------------------------
+            # FINAL TOTAL
+            # ---------------------------------
 
-            # Percentage discount
-            if coupon.discount_type == "percentage":
-                discount_amount = (
-                    products_total
-                    * Decimal(str(coupon.discount_value))
-                    / Decimal("100")
-                )
+            total_amount = max(
+                Decimal("0.00"),
+                products_total
+                - discount
+                + delivery_fee,
+            )
 
-            # Fixed discount
-            else:
-                discount_amount = Decimal(
-                    str(coupon.discount_value)
-                )
+            # ---------------------------------
+            # USER
+            # ---------------------------------
 
-            if discount_amount > products_total:
-                discount_amount = products_total
+            user = (
+                request.user
+                if request.user.is_authenticated
+                else None
+            )
 
-        total_amount = (
-            products_total
-            - discount_amount
-            + delivery_fee
-        )
-
-        if total_amount < 0:
-            total_amount = Decimal("0.00")
-
-        # --------------------------------
-        # CREATE ORDER
-        # --------------------------------
-
-        with transaction.atomic():
+            # ---------------------------------
+            # CREATE ORDER
+            # ---------------------------------
 
             order = Order.objects.create(
-                user=(
-                    request.user
-                    if request.user.is_authenticated
-                    else None
-                ),
+                user=user,
                 full_name=full_name,
                 email=email,
                 phone=phone,
@@ -1600,57 +1818,76 @@ def post(self, request):
                 state=state,
                 country=country,
                 delivery_method=delivery_method,
-                pickup_address=pickup_address,
+                pickup_address=(
+                    pickup_address
+                    if delivery_method
+                    == "pickup"
+                    else None
+                ),
                 coupon=coupon,
                 subtotal=products_total,
-                discount_amount=discount_amount,
+                discount=discount,
                 delivery_fee=delivery_fee,
                 total_amount=total_amount,
                 payment_status="pending",
                 status="pending",
             )
 
+            # ---------------------------------
+            # CREATE ORDER ITEMS
+            # ---------------------------------
+
             for item in order_items:
+
                 OrderItem.objects.create(
                     order=order,
                     product=item["product"],
                     variant=item["variant"],
-                    product_name=item["product_name"],
-                    variant_size=item["variant_size"],
                     quantity=item["quantity"],
-                    price=item["price"],
+                    unit_price=item["unit_price"],
+                    subtotal=item["subtotal"],
+                    product_name=item[
+                        "product"
+                    ].name,
+                    variant_size=item[
+                        "size"
+                    ],
                 )
 
-        # --------------------------------
-        # SERIALIZE ORDER
-        # --------------------------------
+            # ---------------------------------
+            # SUCCESS
+            # ---------------------------------
 
-        serializer = OrderSerializer(order)
+            return Response(
+                {
+                    "message": (
+                        "Order created successfully."
+                    ),
+                    "order": (
+                        OrderSerializer(
+                            order
+                        ).data
+                    ),
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED,
-        )
+        except Exception as e:
 
-    except Exception as e:
+            print(
+                "CREATE ORDER ERROR:",
+                repr(e)
+            )
 
-        import traceback
-
-        print("========================================")
-        print("CREATE ORDER ERROR")
-        print("========================================")
-        print(str(e))
-        traceback.print_exc()
-        print("========================================")
-
-        return Response(
-            {
-                "error": "Create order failed.",
-                "detail": str(e),
-                "exception": e.__class__.__name__,
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+            return Response(
+                {
+                    "error": (
+                        "Unable to create order."
+                    ),
+                    "detail": str(e),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
     
 class MyOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
