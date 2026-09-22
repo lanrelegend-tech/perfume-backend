@@ -110,16 +110,17 @@ class AdminOrderDetailView(
                 "cancelled",
             ],
             "processing": [
-                "shipped",
-                "delivered",
-                "cancelled",
+                  "shipped",
+                  "delivered",
+                  "cancelled",
             ],
             "shipped": [
-                "delivered",
-                "cancelled",
+               "delivered",
+               "cancelled",
             ],
-            "delivered": [],
-            "cancelled": [],
+            "delivered": [
+             "cancelled",
+            ],
         }
 
         allowed_statuses = allowed_transitions.get(
