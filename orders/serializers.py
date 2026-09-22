@@ -87,7 +87,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "coupon",
-            "discount_amount",
+            "coupon_code",
              "status_history",
         ]
 
@@ -98,7 +98,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "total_amount",
             "delivery_fee",
             "coupon",
-            "discount_amount",
+            "coupon_code",
             "status",
             "payment_status",
             "payment_reference",
@@ -133,6 +133,11 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             }
             for history in obj.status_history.all()
         ]
+    coupon_code = serializers.CharField(
+        source="coupon.code",
+        read_only=True,
+        allow_null=True,
+    )    
     class Meta:
         model = Order
 
@@ -144,7 +149,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "total_amount",
             "delivery_fee",
             "coupon",
-            "discount_amount",
+            "coupon_code",
             "status",
             "payment_status",
             "payment_reference",
@@ -172,7 +177,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "total_amount",
             "delivery_fee",
             "coupon",
-            "discount_amount",
+            "coupon_code",
             "payment_reference",
             "shipped_at",
             "delivered_at",
