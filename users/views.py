@@ -45,6 +45,39 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            self.perform_create(serializer)
+
+        except Exception as error:
+            import traceback
+
+            print("REGISTER ERROR:", repr(error))
+            traceback.print_exc()
+
+            return Response(
+                {
+                    "error": "Registration failed",
+                    "detail": str(error),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        headers = self.get_success_headers(serializer.data)
+
+        return Response(
+            {
+                **serializer.data,
+                "verification_required": True,
+                "message": "Account created. Please verify your email.",
+            },
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
     def perform_create(self, serializer):
         user = serializer.save()
 
@@ -80,20 +113,6 @@ class RegisterView(generics.CreateAPIView):
             "RESEND VERIFICATION EMAIL RESPONSE:",
             response
         )
-
-# =========================================================
-# VERIFY EMAIL
-# =========================================================
-
-@method_decorator(
-    ratelimit(
-        key="ip",
-        rate="10/m",
-        method="POST",
-        block=True,
-    ),
-    name="dispatch",
-)
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
 
