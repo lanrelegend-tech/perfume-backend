@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
+import resend
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
@@ -53,33 +54,32 @@ class RegisterView(generics.CreateAPIView):
 
         verification.generate_code()
 
-        # Resend / email debugging
-        try:
-            send_mail(
-                subject="Verify your email",
-                message=(
-                    f"Hello {user.first_name or user.username},\n\n"
-                    "Welcome to our store! 🎉\n\n"
-                    "Thank you for creating an account with us.\n\n"
-                    "Your email verification code is:\n\n"
-                    f"{verification.code}\n\n"
-                    "This code will expire in 10 minutes.\n\n"
-                    "Please enter this code on the verification page "
-                    "to complete your account registration.\n\n"
-                    "If you did not create this account, you can safely "
-                    "ignore this email.\n\n"
-                    "Thank you,\n"
-                    "Customer Support"
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
+        resend.api_key = settings.RESEND_API_KEY
 
-        except Exception as error:
-            print("REGISTER EMAIL ERROR:", repr(error))
-            raise
+        response = resend.Emails.send({
+            "from": "ORENTEMIST <onboarding@resend.dev>",
+            "to": [user.email],
+            "subject": "Verify your email",
+            "text": (
+                f"Hello {user.first_name or user.username},\n\n"
+                "Welcome to ORENTEMIST! 🎉\n\n"
+                "Thank you for creating an account with us.\n\n"
+                "Your email verification code is:\n\n"
+                f"{verification.code}\n\n"
+                "This code will expire in 10 minutes.\n\n"
+                "Please enter this code on the verification page "
+                "to complete your account registration.\n\n"
+                "If you did not create this account, you can safely "
+                "ignore this email.\n\n"
+                "Thank you,\n"
+                "ORENTEMIST Customer Support"
+            ),
+        })
 
+        print(
+            "RESEND VERIFICATION EMAIL RESPONSE:",
+            response
+        )
 
 # =========================================================
 # VERIFY EMAIL
