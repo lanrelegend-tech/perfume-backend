@@ -593,11 +593,7 @@ class InitializePaymentView(APIView):
         {"error": "Invalid order or checkout token"},
         status=403
     )
-        except Order.DoesNotExist:
-            return Response(
-                {"error": "Order not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        
 
         if order.payment_status == "paid":
             return Response(
@@ -1366,7 +1362,7 @@ class PaystackWebhookView(APIView):
                     Order.objects
                     .select_for_update()
                     .get(
-                        order_number=reference
+                         payment_reference=reference
                     )
                 )
 
