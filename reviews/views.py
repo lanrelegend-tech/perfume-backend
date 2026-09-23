@@ -11,6 +11,9 @@ from .models import Review
 from .serializers import ReviewSerializer
 from orders.models import OrderItem
 
+class ReviewCreateThrottle(UserRateThrottle):
+    rate = "3/hour"
+
 class ProductReviewListView(generics.ListAPIView):
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -22,7 +25,7 @@ class ProductReviewListView(generics.ListAPIView):
             product_id=product_id
         ).select_related("user")
 
-from rest_framework.throttling import UserRateThrottle
+
 class CreateReviewView(generics.CreateAPIView):
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticated]
