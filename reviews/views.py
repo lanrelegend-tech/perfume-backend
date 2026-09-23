@@ -1,3 +1,4 @@
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 
@@ -32,16 +33,25 @@ class CreateReviewView(generics.CreateAPIView):
         ).exists()
 
         if not has_purchased:
-            from rest_framework.exceptions import PermissionDenied
-
             raise PermissionDenied(
                 "You can only review products you have purchased."
             )
+
+        already_reviewed = Review.objects.filter(
+            user=self.request.user,
+            product_id=product_id
+        ).exists()
+
+        if already_reviewed:
+            raise ValidationError({
+                "detail": "You have already reviewed this product."
+            })
 
         serializer.save(
             user=self.request.user,
             product_id=product_id
         )
+
 
 class ReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ReviewSerializer
