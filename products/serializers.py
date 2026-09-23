@@ -131,7 +131,6 @@ class AdminProductVariantSerializer(serializers.ModelSerializer):
         ]
 
 
-                
 class AdminProductSerializer(serializers.ModelSerializer):
     category_id = serializers.PrimaryKeyRelatedField(
         source="category",
@@ -161,9 +160,37 @@ class AdminProductSerializer(serializers.ModelSerializer):
 
         read_only_fields = [
             "id",
+            "in_stock",
             "created_at",
             "updated_at",
-        ]      
+        ]
+
+    def create(self, validated_data):
+        stock_quantity = validated_data.get(
+            "stock_quantity",
+            0
+        )
+
+        validated_data["in_stock"] = (
+            stock_quantity > 0
+        )
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "stock_quantity" in validated_data:
+            stock_quantity = validated_data[
+                "stock_quantity"
+            ]
+
+            validated_data["in_stock"] = (
+                stock_quantity > 0
+            )
+
+        return super().update(
+            instance,
+            validated_data
+        )
 class AdminInventorySerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(
         source="category.name",
