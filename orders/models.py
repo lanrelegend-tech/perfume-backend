@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 from django.contrib.auth.models import User
 from products.models import Product
 
@@ -75,6 +76,11 @@ class Order(models.Model):
         blank=True,
         null=True
     )
+    checkout_token = models.UUIDField(
+    default=uuid.uuid4,
+    unique=True,
+    editable=False
+)
     delivery_method = models.CharField(
     max_length=20,
     choices=[
