@@ -575,10 +575,24 @@ class InitializePaymentView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request, order_id):
+        checkout_token = request.data.get("checkout_token")
+
+        if not checkout_token:
+            return Response(
+        {"error": "Checkout token is required"},
+        status=400
+    )
+
         try:
-            order = Order.objects.get(
-                id=order_id
-            )
+          order = Order.objects.get(
+           id=order_id,
+        checkout_token=checkout_token
+    )
+        except Order.DoesNotExist:
+          return Response(
+        {"error": "Invalid order or checkout token"},
+        status=403
+    )
         except Order.DoesNotExist:
             return Response(
                 {"error": "Order not found"},
@@ -625,6 +639,7 @@ class InitializePaymentView(APIView):
             "metadata": {
                 "order_id": order.id,
                 "order_number": order.order_number,
+                "checkout_token": str(order.checkout_token),
             },
         }
 
@@ -679,6 +694,7 @@ class InitializePaymentView(APIView):
         return Response({
             "order_id": order.id,
             "order_number": order.order_number,
+               "checkout_token": str(order.checkout_token),
             "reference": data["data"]["reference"],
             "access_code": data["data"]["access_code"],
             "authorization_url": (
@@ -693,10 +709,17 @@ class VerifyPaymentView(APIView):
     @transaction.atomic
     def post(self, request):
         reference = request.data.get("reference")
+        checkout_token = request.data.get("checkout_token")
 
         if not reference:
             return Response(
                 {"error": "reference is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not checkout_token:
+            return Response(
+                {"error": "checkout_token is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -705,7 +728,8 @@ class VerifyPaymentView(APIView):
                 Order.objects
                 .select_for_update()
                 .get(
-                    payment_reference=reference
+                    payment_reference=reference,
+                     checkout_token=checkout_token
                 )
             )
         except Order.DoesNotExist:
@@ -773,6 +797,13 @@ class VerifyPaymentView(APIView):
             )
 
         payment = data.get("data", {})
+        if payment.get("reference") != reference:
+            return Response(
+        {
+            "error": "Paystack payment reference does not match the order."
+        },
+            status=status.HTTP_400_BAD_REQUEST
+    )
 
         # ---------------------------------
         # CHECK PAYMENT STATUS
