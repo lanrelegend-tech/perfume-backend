@@ -42,7 +42,23 @@ from .serializers import (
 # =========================================================
 # REGISTER
 # =========================================================
+@method_decorator(
 
+    ratelimit(
+
+        key="ip",
+
+        rate="5/h",
+
+        method="POST",
+
+        block=True,
+
+    ),
+
+    name="dispatch",
+
+)
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
@@ -54,20 +70,26 @@ class RegisterView(generics.CreateAPIView):
         try:
             self.perform_create(serializer)
 
-        except Exception as error:
-            import traceback
+        except Exception:
+              return Response(
 
-            print("REGISTER ERROR:", repr(error))
-            traceback.print_exc()
-
-            return Response(
                 {
-                    "error": "Registration failed",
-                    "detail": str(error),
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
 
+                    "error": "Registration failed",
+
+                    "detail": (
+
+                        "Unable to create your account. "
+
+                        "Please try again later."
+
+                    ),
+
+                },
+
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+
+            )
         headers = self.get_success_headers(serializer.data)
 
         return Response(
@@ -117,26 +139,44 @@ class RegisterView(generics.CreateAPIView):
                 ),
             })
 
-            print(
-                "VERIFICATION EMAIL RESPONSE:",
-                response
-            )
 
-        except Exception as error:
-            import traceback
-
-            print(
-                "REGISTER EMAIL ERROR:",
-                repr(error)
-            )
-            traceback.print_exc()
+        except Exception:
             raise
 
 
 # =========================================================
 # VERIFY EMAIL
 # =========================================================
+@method_decorator(
 
+    ratelimit(
+
+        key="ip",
+
+        rate="5/m",
+
+        method="POST",
+
+        block=True,
+
+    ),
+
+    name="dispatch",
+
+)
+# =========================================================
+# VERIFY EMAIL
+# =========================================================
+
+@method_decorator(
+    ratelimit(
+        key="ip",
+        rate="5/m",
+        method="POST",
+        block=True,
+    ),
+    name="dispatch",
+)
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
 
@@ -153,25 +193,17 @@ class VerifyEmailView(APIView):
         email = serializer.validated_data["email"]
         code = serializer.validated_data["code"]
 
-        try:
-            user = User.objects.filter(
-    email=email
-).order_by("id").first()
+        user = User.objects.filter(
+            email=email
+        ).order_by("id").first()
 
-            if not user:
-              return Response(
-        {
-            "error": "Account not found"
-        },
-        status=status.HTTP_404_NOT_FOUND,
-    )
-
-        except User.DoesNotExist:
+        # Do not reveal whether an email is registered.
+        if not user:
             return Response(
                 {
-                    "error": "Account not found"
+                    "error": "Invalid verification code"
                 },
-                status=status.HTTP_404_NOT_FOUND,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -183,9 +215,9 @@ class VerifyEmailView(APIView):
         except EmailVerificationCode.DoesNotExist:
             return Response(
                 {
-                    "error": "Verification code not found"
+                    "error": "Invalid verification code"
                 },
-                status=status.HTTP_404_NOT_FOUND,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if verification.verified_at:
@@ -214,7 +246,7 @@ class VerifyEmailView(APIView):
 
         verification.verified_at = timezone.now()
 
-        # Attach previous guest orders to the new account
+        # Attach previous guest orders to the new account.
         Order.objects.filter(
             user__isnull=True,
             email__iexact=user.email,
@@ -232,92 +264,87 @@ class VerifyEmailView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
 # =========================================================
 # RESEND VERIFICATION CODE
 # =========================================================
 
+@method_decorator(
+    ratelimit(
+        key="ip",
+        rate="3/10m",
+        method="POST",
+        block=True,
+    ),
+    name="dispatch",
+)
 class ResendVerificationView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        try:
-            serializer = ResendVerificationSerializer(
-                data=request.data
-            )
+        serializer = ResendVerificationSerializer(
+            data=request.data
+        )
 
-            serializer.is_valid(
-                raise_exception=True
-            )
+        serializer.is_valid(
+            raise_exception=True
+        )
 
-            email = serializer.validated_data["email"]
+        email = serializer.validated_data["email"]
 
-            print(
-                "RESEND VERIFICATION REQUEST FOR:",
-                email
-            )
+        user = User.objects.filter(
+            email=email
+        ).order_by("id").first()
 
-            user = User.objects.filter(
-             email=email
-).order_by("id").first()
-
-            if not user:
-             return Response(
-        {
-            "error": "No account found with this email address."
-        },
-        status=status.HTTP_404_NOT_FOUND,
-    )
-
-            try:
-                verification = (
-                    EmailVerificationCode.objects
-                    .get(user=user)
-                )
-
-            except EmailVerificationCode.DoesNotExist:
-                verification = (
-                    EmailVerificationCode.objects.create(
-                        user=user,
-                        code=str(
-                            random.randint(
-                                100000,
-                                999999
-                            )
-                        ),
-                        expires_at=(
-                            timezone.now()
-                            + timedelta(minutes=10)
-                        ),
+        # Always return the same response.
+        # This prevents account enumeration.
+        if not user:
+            return Response(
+                {
+                    "message": (
+                        "If an account exists with this email, "
+                        "a verification code has been sent."
                     )
-                )
-
-            if verification.verified_at:
-                return Response(
-                    {
-                        "message": "Email is already verified"
-                    },
-                    status=status.HTTP_200_OK,
-                )
-
-            # Generate a fresh verification code
-            verification.generate_code()
-
-            print(
-                "NEW VERIFICATION CODE GENERATED FOR:",
-                user.email
+                },
+                status=status.HTTP_200_OK,
             )
 
-            print(
-                "VERIFICATION CODE:",
-                verification.code
+        try:
+            verification = (
+                EmailVerificationCode.objects
+                .get(user=user)
             )
 
-            # Resend API
+        except EmailVerificationCode.DoesNotExist:
+            verification = (
+                EmailVerificationCode.objects.create(
+                    user=user,
+                    code=str(
+                        random.randint(
+                            100000,
+                            999999
+                        )
+                    ),
+                    expires_at=(
+                        timezone.now()
+                        + timedelta(minutes=10)
+                    ),
+                )
+            )
+
+        if verification.verified_at:
+            return Response(
+                {
+                    "message": "Email is already verified"
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        verification.generate_code()
+
+        try:
             resend.api_key = settings.RESEND_API_KEY
 
-            response = resend.Emails.send({
+            resend.Emails.send({
                 "from": "ORENTEMIST <onboarding@resend.dev>",
                 "to": [user.email],
                 "subject": (
@@ -336,43 +363,48 @@ class ResendVerificationView(APIView):
                 ),
             })
 
-            print(
-                "RESEND VERIFICATION EMAIL RESPONSE:",
-                response
-            )
-
+        except Exception:
             return Response(
                 {
-                    "message": (
-                        "A new verification code has been sent"
+                    "error": (
+                        "Unable to send the verification email. "
+                        "Please try again later."
                     )
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        except Exception as error:
-            import traceback
-
-            print(
-                "RESEND VERIFICATION ERROR:",
-                repr(error)
-            )
-
-            traceback.print_exc()
-
-            return Response(
-                {
-                    "error": "Resend verification failed",
-                    "detail": str(error),
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        return Response(
+            {
+                "message": (
+                    "If an account exists with this email, "
+                    "a verification code has been sent."
+                )
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # =========================================================
 # FORGOT PASSWORD
 # =========================================================
+@method_decorator(
 
+    ratelimit(
+
+        key="ip",
+
+        rate="3/10m",
+
+        method="POST",
+
+        block=True,
+
+    ),
+
+    name="dispatch",
+
+)
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
 
@@ -403,11 +435,13 @@ class ForgotPasswordView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        reset_code, created = (
+        reset_code,  = (
             PasswordResetCode.objects.get_or_create(
                 user=user
-            )
+            )[0]
+
         )
+        
 
         reset_code.generate_code()
 
@@ -431,11 +465,23 @@ class ForgotPasswordView(APIView):
             )
 
         except Exception as error:
-            print(
-                "PASSWORD RESET EMAIL ERROR:",
-                repr(error)
+            return Response(
+
+                {
+
+                    "message": (
+
+                        "If an account exists with this email, "
+
+                        "a password reset code has been sent."
+
+                    )
+
+                },
+
+                status=status.HTTP_200_OK,
+
             )
-            raise
 
         return Response(
             {
