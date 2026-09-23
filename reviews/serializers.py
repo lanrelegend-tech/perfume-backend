@@ -7,6 +7,10 @@ class ReviewSerializer(serializers.ModelSerializer):
         source="user.username",
         read_only=True
     )
+    product_name = serializers.CharField(
+        source="product.name",
+        read_only=True
+    )
 
     class Meta:
         model = Review
@@ -14,7 +18,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "username",
-           
+            "product_name",
             "rating",
             "comment",
             "created_at",
@@ -26,6 +30,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "user",
             "username",
             "created_at",
+             "product_name",
             "updated_at",
         ]
 
