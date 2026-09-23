@@ -1,5 +1,6 @@
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import generics
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import (
     IsAuthenticatedOrReadOnly,
     IsAuthenticated,
@@ -9,7 +10,6 @@ from rest_framework.permissions import (
 from .models import Review
 from .serializers import ReviewSerializer
 from orders.models import OrderItem
-
 
 class ProductReviewListView(generics.ListAPIView):
     serializer_class = ReviewSerializer
@@ -22,10 +22,11 @@ class ProductReviewListView(generics.ListAPIView):
             product_id=product_id
         ).select_related("user")
 
-
+from rest_framework.throttling import UserRateThrottle
 class CreateReviewView(generics.CreateAPIView):
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ReviewCreateThrottle]
 
     def perform_create(self, serializer):
         product_id = self.kwargs["product_id"]

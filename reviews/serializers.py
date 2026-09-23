@@ -11,6 +11,13 @@ class ReviewSerializer(serializers.ModelSerializer):
         source="product.name",
         read_only=True
     )
+    comment = serializers.CharField(
+
+        min_length=5,
+
+        max_length=1000
+
+    )
 
     class Meta:
         model = Review
