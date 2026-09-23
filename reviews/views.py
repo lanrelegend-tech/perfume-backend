@@ -1,6 +1,10 @@
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
+from rest_framework.permissions import (
+    IsAuthenticatedOrReadOnly,
+    IsAuthenticated,
+    IsAdminUser,
+)
 
 from .models import Review
 from .serializers import ReviewSerializer
@@ -61,3 +65,22 @@ class ReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Review.objects.filter(
             user=self.request.user
         )
+
+
+class AdminReviewListView(generics.ListAPIView):
+    serializer_class = ReviewSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        return Review.objects.all().select_related(
+            "user",
+            "product"
+        ).order_by("-created_at")
+
+
+class AdminReviewDeleteView(generics.DestroyAPIView):
+    serializer_class = ReviewSerializer
+    permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        return Review.objects.all()
