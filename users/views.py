@@ -144,26 +144,7 @@ class RegisterView(generics.CreateAPIView):
             raise
 
 
-# =========================================================
-# VERIFY EMAIL
-# =========================================================
-@method_decorator(
 
-    ratelimit(
-
-        key="ip",
-
-        rate="5/m",
-
-        method="POST",
-
-        block=True,
-
-    ),
-
-    name="dispatch",
-
-)
 # =========================================================
 # VERIFY EMAIL
 # =========================================================
@@ -537,10 +518,9 @@ class ResetPasswordView(APIView):
             )
 
         try:
-            reset_code = (
-                PasswordResetCode.objects
-                .get(user=user)
-            )
+            reset_code = PasswordResetCode.objects.get_or_create(
+    user=user
+)[0]
 
         except PasswordResetCode.DoesNotExist:
             return Response(
