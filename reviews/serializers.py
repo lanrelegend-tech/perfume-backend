@@ -14,7 +14,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "username",
-            "product",
+           
             "rating",
             "comment",
             "created_at",
