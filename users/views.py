@@ -1087,8 +1087,8 @@ class ResendVerificationView(APIView):
 
             send_verification_link_email(user)
 
-        except Exception:
-
+        except Exception as error:
+            print("VERIFICATION LINK EMAIL ERROR:", error)
             return Response(
                 {
                     "error":
