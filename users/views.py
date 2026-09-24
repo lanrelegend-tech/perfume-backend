@@ -676,6 +676,20 @@ class ResendVerificationView(APIView):
     ),
     name="dispatch",
 )
+
+# =========================================================
+# FORGOT PASSWORD
+# =========================================================
+
+@method_decorator(
+    ratelimit(
+        key="ip",
+        rate="3/10m",
+        method="POST",
+        block=True
+    ),
+    name="dispatch",
+)
 class ForgotPasswordView(APIView):
 
     permission_classes = [AllowAny]
@@ -716,8 +730,19 @@ class ForgotPasswordView(APIView):
 
         reset_code, created = (
             PasswordResetCode.objects.get_or_create(
-                user=user
+                user=user,
+                defaults={
+                    "expires_at": (
+                        timezone.now()
+                        + timedelta(minutes=10)
+                    ),
+                },
             )
+        )
+
+        reset_code.expires_at = (
+            timezone.now()
+            + timedelta(minutes=10)
         )
 
         code = reset_code.generate_code()
@@ -747,7 +772,6 @@ class ForgotPasswordView(APIView):
             return generic_response
 
         return generic_response
-
 
 # =========================================================
 # RESET PASSWORD
