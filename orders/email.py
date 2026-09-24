@@ -786,7 +786,7 @@ def send_order_delivered_email(order):
                 order.order_number,
             ),
             (
-                "Total Amount",
+                "Total",
                 f"₦{order.total_amount:,.2f}",
             ),
             (
