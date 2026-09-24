@@ -3,7 +3,7 @@ from datetime import timedelta
 import resend
 
 from django.conf import settings
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password,make_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -704,6 +704,310 @@ class VerifyEmailView(APIView):
         )
 
 
+
+
+
+
+
+def send_verification_link_email(user):
+
+    verification, created = (
+        EmailVerificationCode.objects.get_or_create(
+            user=user,
+            defaults={
+                "code": make_password("unused"),
+                "expires_at": (
+                    timezone.now()
+                    + timedelta(minutes=10)
+                ),
+            },
+        )
+    )
+
+    raw_token = secrets.token_urlsafe(48)
+
+    verification.verification_token = (
+        make_password(raw_token)
+    )
+
+    verification.verification_token_expires_at = (
+        timezone.now()
+        + timedelta(minutes=15)
+    )
+
+    verification.save(
+        update_fields=[
+            "verification_token",
+            "verification_token_expires_at",
+        ]
+    )
+
+    frontend_url = getattr(
+        settings,
+        "FRONTEND_URL",
+        "https://perfume-frontend-new-ashy.vercel.app",
+    ).rstrip("/")
+
+    verification_url = (
+        f"{frontend_url}/account-verification"
+        f"?token={raw_token}"
+    )
+
+    resend.api_key = settings.RESEND_API_KEY
+
+    resend.Emails.send(
+        {
+            "from":
+                "ORENTEMIST <hello@orentemist.online>",
+
+            "to":
+                [user.email],
+
+            "subject":
+                "ORENTEMIST — Verify your email",
+
+            "html":
+                f"""
+                <div style="
+                    font-family: Arial, sans-serif;
+                    background:#f7f7f5;
+                    padding:40px 20px;
+                ">
+
+                    <div style="
+                        max-width:600px;
+                        margin:auto;
+                        background:#ffffff;
+                        padding:45px 35px;
+                        text-align:center;
+                    ">
+
+                        <div style="
+                            font-size:22px;
+                            font-weight:600;
+                            letter-spacing:4px;
+                            margin-bottom:10px;
+                        ">
+                            ORENTEMIST
+                        </div>
+
+                        <div style="
+                            font-size:11px;
+                            letter-spacing:3px;
+                            color:#999;
+                            text-transform:uppercase;
+                            margin-bottom:40px;
+                        ">
+                            The Art of Fragrance
+                        </div>
+
+                        <h1 style="
+                            font-size:28px;
+                            font-weight:400;
+                            margin-bottom:20px;
+                            color:#111;
+                        ">
+                            Verify your email
+                        </h1>
+
+                        <p style="
+                            color:#555;
+                            font-size:15px;
+                            line-height:1.7;
+                            margin-bottom:30px;
+                        ">
+                            Hello {user.first_name or user.username},
+                            <br><br>
+                            We noticed that you tried to sign in
+                            before verifying your email address.
+                            Please verify your email using the button
+                            below to continue to your ORENTEMIST account.
+                        </p>
+
+                        <a
+                            href="{verification_url}"
+                            style="
+                                display:inline-block;
+                                background:#000;
+                                color:#fff;
+                                text-decoration:none;
+                                padding:15px 30px;
+                                font-size:13px;
+                                letter-spacing:1px;
+                                border-radius:6px;
+                            "
+                        >
+                            VERIFY MY EMAIL
+                        </a>
+
+                        <p style="
+                            color:#999;
+                            font-size:12px;
+                            line-height:1.6;
+                            margin-top:30px;
+                        ">
+                            This verification link expires in
+                            15 minutes and can only be used once.
+                        </p>
+
+                        <div style="
+                            margin-top:45px;
+                            padding-top:25px;
+                            border-top:1px solid #eee;
+                            color:#999;
+                            font-size:11px;
+                            line-height:1.8;
+                        ">
+                            <strong style="color:#111;">
+                                ORENTEMIST
+                            </strong>
+                            <br>
+                            The Art of Fragrance
+                            <br>
+                            Crafted for those who leave an impression.
+                            <br><br>
+                            22 Oyun, Ilorin, Kwara State, Nigeria
+                            <br>
+                            09153242202
+                            <br>
+                            lanrelegend@gmail.com
+                            <br><br>
+                            Instagram:
+                            @lanre_legend
+                            <br>
+                            TikTok:
+                            @lanre_legend
+                            <br><br>
+                            <a
+                                href="https://orentemist.online"
+                                style="color:#111;"
+                            >
+                                orentemist.online
+                            </a>
+                        </div>
+
+                    </div>
+
+                </div>
+                """,
+        }
+    )
+
+
+# =========================================================
+# VERIFY EMAIL BY SECURE LINK
+# =========================================================
+
+class VerifyEmailLinkView(APIView):
+
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+
+        token = (
+            request.data.get("token", "")
+            .strip()
+        )
+
+        if not token:
+            return Response(
+                {
+                    "error":
+                        "Invalid verification link."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification = (
+            EmailVerificationCode.objects
+            .select_related("user")
+            .filter(
+                verification_token__isnull=False,
+                verification_token_expires_at__isnull=False,
+            )
+            .order_by("id")
+        )
+
+        matched_verification = None
+
+        for item in verification:
+
+            if not item.verification_token:
+                continue
+
+            if check_password(
+                token,
+                item.verification_token
+            ):
+                matched_verification = item
+                break
+
+        if matched_verification is None:
+            return Response(
+                {
+                    "error":
+                        "Invalid or expired verification link."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification = matched_verification
+        user = verification.user
+
+        if verification.verified_at:
+            return Response(
+                {
+                    "message":
+                        "Email is already verified."
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if (
+            not verification.verification_token_expires_at
+            or timezone.now()
+            >= verification.verification_token_expires_at
+        ):
+            return Response(
+                {
+                    "error":
+                        "This verification link has expired. "
+                        "Please request a new one."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verification.verified_at = timezone.now()
+
+        verification.verification_token = None
+
+        verification.verification_token_expires_at = None
+
+        verification.save(
+            update_fields=[
+                "verified_at",
+                "verification_token",
+                "verification_token_expires_at",
+            ]
+        )
+
+        Order.objects.filter(
+            user__isnull=True,
+            email__iexact=user.email
+        ).update(
+            user=user
+        )
+
+        return Response(
+            {
+                "message":
+                    "Email verified successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    
 # =========================================================
 # RESEND VERIFICATION
 # =========================================================

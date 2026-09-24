@@ -20,6 +20,7 @@ from .views import (
     ResetPasswordView,
     AdminGuestCustomerListView,
     LogoutView,
+    VerifyEmailLinkView,
 )
 
 urlpatterns = [
@@ -28,6 +29,10 @@ urlpatterns = [
         RegisterView.as_view(),
         name="register",
     ),
+    path(
+    "verify-email-link/",
+    VerifyEmailLinkView.as_view(),
+),
 
     path(
         "login/",

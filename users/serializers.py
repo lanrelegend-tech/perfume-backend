@@ -12,7 +12,6 @@ from .models import CustomerProfile
 # =========================================================
 # LOGIN / JWT
 # =========================================================
-
 class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     username_field = "email"
@@ -59,9 +58,13 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
         )
 
         if verification is None or not verification.verified_at:
-            raise serializers.ValidationError(
-                "Please verify your email before logging in."
-            )
+            raise serializers.ValidationError({
+                "error": "email_not_verified",
+                "message": (
+                    "Your email is not verified. "
+                    "Please check your email for a verification link."
+                ),
+            })
 
         refresh = self.get_token(user)
 

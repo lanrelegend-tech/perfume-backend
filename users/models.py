@@ -38,6 +38,16 @@ class EmailVerificationCode(models.Model):
 
     # Stores a Django password hash, NOT the plaintext code.
     code = models.CharField(max_length=128)
+    verification_token = models.CharField(
+      max_length=128,
+      blank=True,
+      null=True,
+)
+
+    verification_token_expires_at = models.DateTimeField(
+      null=True,
+      blank=True,
+)
 
     expires_at = models.DateTimeField()
 
