@@ -1823,16 +1823,18 @@ class AdminRefundPaymentView(APIView):
         # -------------------------------------------------
 
         def send_refund_email_after_commit():
-
             try:
-
-                from .email import (
-                    send_order_refund_email
-                )
+                from .email import send_order_refund_email
 
                 send_order_refund_email(
                     order,
                     refund,
+                )
+
+            except Exception as exc:
+                print(
+                    "REFUND EMAIL ERROR:",
+                    repr(exc),
                 )
 
             
