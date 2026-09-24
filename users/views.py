@@ -814,19 +814,6 @@ class ResendVerificationView(APIView):
         return generic_response
 
 
-# =========================================================
-# FORGOT PASSWORD
-# =========================================================
-
-@method_decorator(
-    ratelimit(
-        key="ip",
-        rate="3/10m",
-        method="POST",
-        block=True
-    ),
-    name="dispatch",
-)
 
 # =========================================================
 # FORGOT PASSWORD
