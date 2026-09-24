@@ -1010,6 +1010,31 @@ class ResetPasswordView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        print("RESET DEBUG")
+
+        print("EMAIL:", email)
+
+        print("SUBMITTED CODE:", submitted_code)
+
+        print("STORED HASH:", reset_code.code)
+
+        print("EXPIRES:", reset_code.expires_at)
+
+        print("NOW:", timezone.now())
+
+        print(
+
+    "CODE MATCH:",
+
+           check_password(
+
+        submitted_code,
+
+        reset_code.code
+
+    )
+
+)
 
         if not check_password(
             submitted_code,
