@@ -414,7 +414,7 @@ class AdminOrderDetailView(
 
                     except Exception as exc:
                         print(
-                            "ERROR:",
+                            "REFUND EMAIL ERROR:",
                             repr(exc),
                         )
 
@@ -2855,6 +2855,12 @@ class CreateOrderView(APIView):
                 status=status.HTTP_201_CREATED,
             )
 
+        except Exception as e:
+
+            print(
+                "CREATE ORDER ERROR:",
+                repr(e)
+            )
 
             return Response(
                 {
