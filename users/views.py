@@ -1,5 +1,5 @@
 from datetime import timedelta
-
+import secrets
 import resend
 
 from django.conf import settings
