@@ -824,21 +824,43 @@ def send_verification_link_email(user):
                             below to continue to your ORENTEMIST account.
                         </p>
 
-                        <a
-                            href="{verification_url}"
-                            style="
-                                display:inline-block;
-                                background:#000;
-                                color:#fff;
-                                text-decoration:none;
-                                padding:15px 30px;
-                                font-size:13px;
-                                letter-spacing:1px;
-                                border-radius:6px;
-                            "
-                        >
-                            VERIFY MY EMAIL
-                        </a>
+                       <table
+    role="presentation"
+    border="0"
+    cellpadding="0"
+    cellspacing="0"
+    width="100%"
+    style="margin:0 auto;"
+>
+    <tr>
+        <td
+            align="center"
+            style="padding:0;"
+        >
+            <a
+                href="{verification_url}"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="
+                    display:inline-block;
+                    background-color:#000000;
+                    color:#ffffff;
+                    text-decoration:none;
+                    padding:16px 32px;
+                    font-family:Arial,Helvetica,sans-serif;
+                    font-size:13px;
+                    font-weight:600;
+                    letter-spacing:1px;
+                    line-height:20px;
+                    border-radius:6px;
+                    text-align:center;
+                "
+            >
+                VERIFY MY EMAIL
+            </a>
+        </td>
+    </tr>
+</table>
 
                         <p style="
                             color:#999;
