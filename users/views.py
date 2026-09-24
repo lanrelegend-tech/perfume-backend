@@ -884,6 +884,11 @@ class ForgotPasswordView(APIView):
         )
 
         code = reset_code.generate_code()
+        print("GENERATED RESET CODE:", code)
+        print(
+           "GENERATED CODE MATCH:",
+           check_password(code, reset_code.code)
+)
 
         try:
 
