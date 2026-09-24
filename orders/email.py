@@ -596,8 +596,6 @@ def send_order_confirmation_email(order):
             fulfillment_details,
         ],
     )
-
-
 # =========================================================
 # ORDER SHIPPED
 # =========================================================
