@@ -112,30 +112,30 @@ class PasswordResetCode(models.Model):
             timezone.now() < self.expires_at
             and self.attempts < self.MAX_ATTEMPTS
         )
-
     def generate_code(self):
-        code = str(
-            secrets.randbelow(900000) + 100000
-        )
+        import secrets
+        from django.contrib.auth.hashers import make_password
+
+        code = f"{secrets.randbelow(1000000):06d}"
 
         self.code = make_password(code)
 
         self.expires_at = (
-            timezone.now()
-            + timedelta(minutes=10)
-        )
+        timezone.now() + timedelta(minutes=10)
+    )
 
         self.attempts = 0
 
         self.save(
-            update_fields=[
-                "code",
-                "expires_at",
-                "attempts",
-            ]
-        )
+        update_fields=[
+            "code",
+            "expires_at",
+            "attempts",
+        ]
+    )
 
         return code
+        
 
     def __str__(self):
         return f"{self.user.email} password reset"
