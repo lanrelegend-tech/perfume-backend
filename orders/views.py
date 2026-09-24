@@ -62,7 +62,6 @@ class AdminOrderListView(generics.ListAPIView):
             )
             .order_by("-created_at")
         )
-    
 class AdminOrderDetailView(
     generics.RetrieveUpdateAPIView
 ):
@@ -75,11 +74,12 @@ class AdminOrderDetailView(
             .all()
             .prefetch_related(
                 "items",
-                "status_history"
+                "status_history",
+                "refunds",
             )
             .select_related(
                 "user",
-                "coupon"
+                "coupon",
             )
         )
 
@@ -90,15 +90,41 @@ class AdminOrderDetailView(
             Order.objects
             .select_for_update()
             .prefetch_related("items")
+            .select_related("user", "coupon")
             .get(pk=self.get_object().pk)
         )
 
         old_status = order.status
+        old_payment_status = order.payment_status
 
         new_status = serializer.validated_data.get(
             "status",
-            old_status
+            old_status,
         )
+
+        new_payment_status = serializer.validated_data.get(
+            "payment_status",
+            old_payment_status,
+        )
+
+        # -------------------------------------------------
+        # PAYMENT STATUS CAN NEVER BE CHANGED BY ADMIN PATCH
+        # -------------------------------------------------
+
+        if new_payment_status != old_payment_status:
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({
+                "payment_status": (
+                    "Payment status cannot be changed manually. "
+                    "Payments and refunds must be processed "
+                    "through the payment endpoints."
+                )
+            })
+
+        # -------------------------------------------------
+        # ALLOWED STATUS TRANSITIONS
+        # -------------------------------------------------
 
         allowed_transitions = {
             "pending": [
@@ -110,27 +136,24 @@ class AdminOrderDetailView(
                 "cancelled",
             ],
             "processing": [
-                  "shipped",
-                  "delivered",
-                  "cancelled",
+                "shipped",
+                "delivered",
+                "cancelled",
             ],
             "shipped": [
-               "delivered",
-               "cancelled",
+                "delivered",
+                "cancelled",
             ],
             "delivered": [
-             "cancelled",
+                "cancelled",
             ],
+            "cancelled": [],
         }
 
         allowed_statuses = allowed_transitions.get(
             old_status,
-            []
+            [],
         )
-
-        # ---------------------------------------------
-        # CHECK STATUS TRANSITION
-        # ---------------------------------------------
 
         if (
             new_status != old_status
@@ -148,26 +171,48 @@ class AdminOrderDetailView(
                 )
             })
 
-        # =====================================================
+        # -------------------------------------------------
+        # NEVER MOVE UNPAID ORDERS INTO FULFILMENT
+        # -------------------------------------------------
+
+        fulfilment_statuses = {
+            "confirmed",
+            "processing",
+            "shipped",
+            "delivered",
+        }
+
+        if (
+            new_status in fulfilment_statuses
+            and order.payment_status != "paid"
+        ):
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({
+                "status": (
+                    "An order cannot be moved into "
+                    "fulfilment before payment is confirmed."
+                )
+            })
+
+        # -------------------------------------------------
         # CANCEL ORDER
-        # =====================================================
+        # -------------------------------------------------
 
         if (
             old_status != "cancelled"
             and new_status == "cancelled"
         ):
 
-            # =================================================
-            # PAID ORDER
-            # =================================================
+            refund = None
+
+            # -------------------------------------------------
+            # PAID ORDER -> REFUND THROUGH PAYSTACK
+            # -------------------------------------------------
 
             if order.payment_status == "paid":
 
                 from rest_framework.exceptions import ValidationError
-
-                # ---------------------------------------------
-                # REQUIRE PAYMENT REFERENCE
-                # ---------------------------------------------
 
                 if not order.payment_reference:
                     raise ValidationError({
@@ -177,10 +222,6 @@ class AdminOrderDetailView(
                         )
                     })
 
-                # ---------------------------------------------
-                # REQUIRE PAYSTACK SECRET KEY
-                # ---------------------------------------------
-
                 if not settings.PAYSTACK_SECRET_KEY:
                     raise ValidationError({
                         "status": (
@@ -188,15 +229,14 @@ class AdminOrderDetailView(
                         )
                     })
 
-                # ---------------------------------------------
-                # PREVENT DUPLICATE REFUND
-                # ---------------------------------------------
-
                 existing_refund = (
                     Refund.objects
                     .filter(
                         order=order,
-                        status="processed"
+                        status__in=[
+                            "pending",
+                            "processed",
+                        ],
                     )
                     .first()
                 )
@@ -204,36 +244,37 @@ class AdminOrderDetailView(
                 if existing_refund:
                     raise ValidationError({
                         "status": (
-                            "This order has already been refunded."
+                            "A refund for this order already "
+                            "exists or is being processed."
                         )
                     })
 
-                # ---------------------------------------------
-                # CREATE REFUND RECORD
-                # ---------------------------------------------
+                reason = (
+                    self.request.data.get(
+                        "reason",
+                        "Order cancelled by admin",
+                    )
+                    or "Order cancelled by admin"
+                ).strip()
+
+                if len(reason) > 500:
+                    raise ValidationError({
+                        "reason": (
+                            "Refund reason cannot exceed "
+                            "500 characters."
+                        )
+                    })
 
                 refund = Refund.objects.create(
                     order=order,
                     amount=order.total_amount,
-                    reason=(
-                        self.request.data.get(
-                            "reason",
-                            "Order cancelled by admin"
-                        )
-                        or "Order cancelled by admin"
-                    ).strip(),
+                    reason=reason,
                     processed_by=self.request.user,
                     status="pending",
                 )
 
-                # ---------------------------------------------
-                # PAYSTACK REFUND
-                # ---------------------------------------------
-
                 payload = {
-                    "transaction": (
-                        order.payment_reference
-                    ),
+                    "transaction": order.payment_reference,
                     "amount": int(
                         order.total_amount * 100
                     ),
@@ -255,7 +296,7 @@ class AdminOrderDetailView(
 
                     data = response.json()
 
-                except requests.RequestException as e:
+                except requests.RequestException as exc:
 
                     refund.status = "failed"
 
@@ -271,11 +312,7 @@ class AdminOrderDetailView(
                             "Could not connect to Paystack. "
                             "The order was not cancelled."
                         )
-                    }) from e
-
-                # ---------------------------------------------
-                # CHECK PAYSTACK RESPONSE
-                # ---------------------------------------------
+                    }) from exc
 
                 if (
                     not response.ok
@@ -296,18 +333,14 @@ class AdminOrderDetailView(
                             data.get(
                                 "message",
                                 "Refund request failed. "
-                                "The order was not cancelled."
+                                "The order was not cancelled.",
                             )
                         )
                     })
 
-                # ---------------------------------------------
-                # SAVE PAYSTACK REFUND
-                # ---------------------------------------------
-
                 refund_data = data.get(
                     "data",
-                    {}
+                    {},
                 )
 
                 refund.status = "processed"
@@ -330,114 +363,17 @@ class AdminOrderDetailView(
                     ]
                 )
 
-                # ---------------------------------------------
-                # RESTORE PRODUCT / VARIANT STOCK
-                # ---------------------------------------------
+                # -------------------------------------------------
+                # RESTORE INVENTORY
+                # -------------------------------------------------
 
-                for item in order.items.all():
-
-                    # -----------------------------------------
-                    # VARIANT PRODUCT
-                    # -----------------------------------------
-
-                    if item.variant_id:
-
-                        variant = (
-                            ProductVariant.objects
-                            .select_for_update()
-                            .get(
-                                pk=item.variant_id
-                            )
-                        )
-
-                        variant.stock_quantity += (
-                            item.quantity
-                        )
-
-                        variant.in_stock = (
-                            variant.stock_quantity > 0
-                        )
-
-                        variant.save(
-                            update_fields=[
-                                "stock_quantity",
-                                "in_stock",
-                            ]
-                        )
-
-                    # -----------------------------------------
-                    # NORMAL PRODUCT
-                    # -----------------------------------------
-
-                    elif item.product_id:
-
-                        product = (
-                            Product.objects
-                            .select_for_update()
-                            .get(
-                                pk=item.product_id
-                            )
-                        )
-
-                        product.stock_quantity += (
-                            item.quantity
-                        )
-
-                        product.in_stock = (
-                            product.stock_quantity > 0
-                        )
-
-                        product.save(
-                            update_fields=[
-                                "stock_quantity",
-                                "in_stock",
-                            ]
-                        )
-
-                # ---------------------------------------------
-                # REVERSE COUPON USAGE
-                # ---------------------------------------------
-
-                if order.coupon_id:
-
-                    coupon = (
-                        Coupon.objects
-                        .select_for_update()
-                        .get(
-                            pk=order.coupon_id
-                        )
-                    )
-
-                    # Reduce total usage count
-                    coupon.used_count = max(
-                        0,
-                        coupon.used_count - 1
-                    )
-
-                    coupon.save(
-                        update_fields=[
-                            "used_count"
-                        ]
-                    )
-
-                    # Remove this customer from the
-                    # coupon's used_by list so the
-                    # customer can use the coupon again
-                    # after a cancelled/refunded order.
-                    if order.user:
-                        coupon.used_by.remove(
-                            order.user
-                        )
-
-                # ---------------------------------------------
-                # MARK PAYMENT AS REFUNDED
-                # ---------------------------------------------
+                _restore_order_inventory_and_coupon(order)
 
                 order.payment_status = "refunded"
 
-            # =================================================
-            # MARK ORDER AS CANCELLED
-            # =================================================
+            # -------------------------------------------------
+            # CANCEL ORDER
+            # -------------------------------------------------
 
             order.status = "cancelled"
 
@@ -448,10 +384,6 @@ class AdminOrderDetailView(
                     "updated_at",
                 ]
             )
-
-            # ---------------------------------------------
-            # STATUS HISTORY
-            # ---------------------------------------------
 
             OrderStatusHistory.objects.create(
                 order=order,
@@ -467,14 +399,9 @@ class AdminOrderDetailView(
                 ),
             )
 
-            # ---------------------------------------------
-            # SEND REFUND EMAIL AFTER DATABASE COMMIT
-            # ---------------------------------------------
-
-            if order.payment_status == "refunded":
+            if refund:
 
                 def send_refund_email_after_commit():
-
                     try:
                         from .email import (
                             send_order_refund_email
@@ -482,14 +409,13 @@ class AdminOrderDetailView(
 
                         send_order_refund_email(
                             order,
-                            refund
+                            refund,
                         )
 
-                    except Exception as e:
-
+                    except Exception as exc:
                         print(
                             "REFUND EMAIL ERROR:",
-                            repr(e)
+                            repr(exc),
                         )
 
                 transaction.on_commit(
@@ -498,29 +424,34 @@ class AdminOrderDetailView(
 
             return
 
-        # =====================================================
+        # -------------------------------------------------
         # NORMAL STATUS UPDATE
-        # =====================================================
+        # -------------------------------------------------
 
-        updated_order = serializer.save()
+        for field, value in serializer.validated_data.items():
 
-        new_status = updated_order.status
+            if field == "payment_status":
+                continue
 
-        # ---------------------------------------------
-        # STATUS HISTORY
-        # ---------------------------------------------
+            setattr(order, field, value)
+
+        order.payment_status = old_payment_status
+
+        order.save()
+
+        new_status = order.status
 
         if old_status != new_status:
 
             OrderStatusHistory.objects.create(
-                order=updated_order,
+                order=order,
                 status=new_status,
                 changed_by=self.request.user,
             )
 
-        # =====================================================
+        # -------------------------------------------------
         # SHIPPED EMAIL
-        # =====================================================
+        # -------------------------------------------------
 
         if (
             old_status != "shipped"
@@ -531,22 +462,16 @@ class AdminOrderDetailView(
                 send_order_shipped_email
             )
 
-            try:
-
-                send_order_shipped_email(
-                    updated_order
+            transaction.on_commit(
+                lambda: _safe_send_email(
+                    send_order_shipped_email,
+                    order,
                 )
+            )
 
-            except Exception as e:
-
-                print(
-                    "SHIPPED EMAIL ERROR:",
-                    repr(e)
-                )
-
-        # =====================================================
+        # -------------------------------------------------
         # DELIVERED EMAIL
-        # =====================================================
+        # -------------------------------------------------
 
         elif (
             old_status != "delivered"
@@ -557,68 +482,682 @@ class AdminOrderDetailView(
                 send_order_delivered_email
             )
 
-            try:
-
-                send_order_delivered_email(
-                    updated_order
+            transaction.on_commit(
+                lambda: _safe_send_email(
+                    send_order_delivered_email,
+                    order,
                 )
+            )
 
-            except Exception as e:
 
-                print(
-                    "DELIVERED EMAIL ERROR:",
-                    repr(e)
+# =========================================================
+# PAYMENT HELPERS
+# =========================================================
+
+def _safe_send_email(email_function, *args):
+
+    try:
+        email_function(*args)
+
+    except Exception as exc:
+        print(
+            "EMAIL ERROR:",
+            repr(exc),
+        )
+
+
+def _get_payment_metadata(payment):
+
+    metadata = payment.get(
+        "metadata",
+        {}
+    )
+
+    if not isinstance(metadata, dict):
+        return {}
+
+    return metadata
+
+
+def _payment_metadata_matches_order(
+    order,
+    payment,
+):
+
+    metadata = _get_payment_metadata(payment)
+
+    metadata_order_id = metadata.get(
+        "order_id"
+    )
+
+    metadata_order_number = metadata.get(
+        "order_number"
+    )
+
+    metadata_checkout_token = metadata.get(
+        "checkout_token"
+    )
+
+    if (
+        metadata_order_id is not None
+        and str(metadata_order_id) != str(order.id)
+    ):
+        return False
+
+    if (
+        metadata_order_number is not None
+        and str(metadata_order_number)
+        != str(order.order_number)
+    ):
+        return False
+
+    if (
+        metadata_checkout_token is not None
+        and str(metadata_checkout_token)
+        != str(order.checkout_token)
+    ):
+        return False
+
+    return True
+
+
+def _restore_order_inventory_and_coupon(order):
+
+    """
+    Restore stock and coupon usage exactly once
+    when an already-paid order is refunded/cancelled.
+    """
+
+    # -------------------------------------------------
+    # RESTORE INVENTORY
+    # -------------------------------------------------
+
+    requirements = {}
+
+    for item in order.items.all():
+
+        if item.variant_id:
+
+            key = (
+                "variant",
+                item.variant_id,
+            )
+
+        elif item.product_id:
+
+            key = (
+                "product",
+                item.product_id,
+            )
+
+        else:
+            continue
+
+        requirements[key] = (
+            requirements.get(key, 0)
+            + item.quantity
+        )
+
+    for key, quantity in requirements.items():
+
+        item_type, item_id = key
+
+        if item_type == "variant":
+
+            variant = (
+                ProductVariant.objects
+                .select_for_update()
+                .get(pk=item_id)
+            )
+
+            variant.stock_quantity += quantity
+
+            variant.in_stock = (
+                variant.stock_quantity > 0
+            )
+
+            variant.save(
+                update_fields=[
+                    "stock_quantity",
+                    "in_stock",
+                ]
+            )
+
+        else:
+
+            product = (
+                Product.objects
+                .select_for_update()
+                .get(pk=item_id)
+            )
+
+            product.stock_quantity += quantity
+
+            product.in_stock = (
+                product.stock_quantity > 0
+            )
+
+            product.save(
+                update_fields=[
+                    "stock_quantity",
+                    "in_stock",
+                ]
+            )
+
+    # -------------------------------------------------
+    # RESTORE COUPON
+    # -------------------------------------------------
+
+    if order.coupon_id:
+
+        coupon = (
+            Coupon.objects
+            .select_for_update()
+            .get(
+                pk=order.coupon_id
+            )
+        )
+
+        if coupon.used_count > 0:
+
+            coupon.used_count -= 1
+
+            coupon.save(
+                update_fields=[
+                    "used_count"
+                ]
+            )
+
+        if order.user:
+            coupon.used_by.remove(
+                order.user
+            )
+
+
+def _finalize_successful_payment(
+    order,
+    payment,
+):
+
+    """
+    Finalize a verified Paystack payment.
+
+    Must be called inside an atomic transaction
+    with the order already locked.
+    """
+
+    # -------------------------------------------------
+    # IDEMPOTENCY
+    # -------------------------------------------------
+
+    if order.payment_status == "paid":
+
+        return False
+
+    if order.payment_status == "refunded":
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "This order has already been refunded."
+        )
+
+    if order.status == "cancelled":
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Cancelled orders cannot be paid."
+        )
+
+    # -------------------------------------------------
+    # PAYMENT REFERENCE
+    # -------------------------------------------------
+
+    reference = payment.get(
+        "reference"
+    )
+
+    if not reference:
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Paystack payment reference is missing."
+        )
+
+    # -------------------------------------------------
+    # VERIFY PAYMENT METADATA
+    # -------------------------------------------------
+
+    if not _payment_metadata_matches_order(
+        order,
+        payment,
+    ):
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Payment metadata does not match the order."
+        )
+
+    # -------------------------------------------------
+    # VERIFY AMOUNT
+    # -------------------------------------------------
+
+    expected_amount = int(
+        order.total_amount * 100
+    )
+
+    if payment.get("amount") != expected_amount:
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Payment amount does not match the order amount."
+        )
+
+    # -------------------------------------------------
+    # VERIFY CURRENCY
+    # -------------------------------------------------
+
+    if payment.get("currency") != "NGN":
+
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError(
+            "Payment currency does not match the order currency."
+        )
+
+    # -------------------------------------------------
+    # AGGREGATE STOCK REQUIREMENTS
+    #
+    # This prevents an order containing the same
+    # variant multiple times from overselling stock.
+    # -------------------------------------------------
+
+    variant_requirements = {}
+    product_requirements = {}
+
+    for item in order.items.all():
+
+        if item.variant_id:
+
+            variant_requirements[item.variant_id] = (
+                variant_requirements.get(
+                    item.variant_id,
+                    0,
                 )
+                + item.quantity
+            )
 
+        elif item.product_id:
+
+            product_requirements[item.product_id] = (
+                product_requirements.get(
+                    item.product_id,
+                    0,
+                )
+                + item.quantity
+            )
+
+    locked_variants = {}
+    locked_products = {}
+
+    # -------------------------------------------------
+    # LOCK + CHECK VARIANTS
+    # -------------------------------------------------
+
+    for variant_id, quantity in variant_requirements.items():
+
+        variant = (
+            ProductVariant.objects
+            .select_for_update()
+            .get(pk=variant_id)
+        )
+
+        if (
+            not variant.in_stock
+            or variant.stock_quantity < quantity
+        ):
+
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError(
+                f"Not enough stock for variant {variant_id}."
+            )
+
+        locked_variants[variant_id] = variant
+
+    # -------------------------------------------------
+    # LOCK + CHECK PRODUCTS
+    # -------------------------------------------------
+
+    for product_id, quantity in product_requirements.items():
+
+        product = (
+            Product.objects
+            .select_for_update()
+            .get(pk=product_id)
+        )
+
+        if (
+            not product.in_stock
+            or product.stock_quantity < quantity
+        ):
+
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError(
+                f"Not enough stock for product {product_id}."
+            )
+
+        locked_products[product_id] = product
+
+    # -------------------------------------------------
+    # REDUCE VARIANT STOCK
+    # -------------------------------------------------
+
+    for variant_id, quantity in variant_requirements.items():
+
+        variant = locked_variants[variant_id]
+
+        variant.stock_quantity -= quantity
+
+        variant.in_stock = (
+            variant.stock_quantity > 0
+        )
+
+        variant.save(
+            update_fields=[
+                "stock_quantity",
+                "in_stock",
+            ]
+        )
+
+    # -------------------------------------------------
+    # REDUCE PRODUCT STOCK
+    # -------------------------------------------------
+
+    for product_id, quantity in product_requirements.items():
+
+        product = locked_products[product_id]
+
+        product.stock_quantity -= quantity
+
+        product.in_stock = (
+            product.stock_quantity > 0
+        )
+
+        product.save(
+            update_fields=[
+                "stock_quantity",
+                "in_stock",
+            ]
+        )
+
+    # -------------------------------------------------
+    # COUPON
+    # -------------------------------------------------
+
+    if order.coupon_id:
+
+        coupon = (
+            Coupon.objects
+            .select_for_update()
+            .get(
+                pk=order.coupon_id
+            )
+        )
+
+        if (
+            coupon.usage_limit is not None
+            and coupon.used_count
+            >= coupon.usage_limit
+        ):
+
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError(
+                "This coupon has reached its usage limit."
+            )
+
+        coupon.used_count += 1
+
+        coupon.save(
+            update_fields=[
+                "used_count"
+            ]
+        )
+
+        if order.user:
+            coupon.used_by.add(
+                order.user
+            )
+
+    # -------------------------------------------------
+    # MARK ORDER PAID
+    # -------------------------------------------------
+
+    old_status = order.status
+
+    order.payment_status = "paid"
+    order.status = "confirmed"
+    order.payment_reference = reference
+
+    order.save(
+        update_fields=[
+            "payment_status",
+            "status",
+            "payment_reference",
+            "updated_at",
+        ]
+    )
+
+    # -------------------------------------------------
+    # STATUS HISTORY
+    # -------------------------------------------------
+
+    if old_status != order.status:
+
+        OrderStatusHistory.objects.create(
+            order=order,
+            status=order.status,
+            changed_by=None,
+            note="Payment confirmed",
+        )
+
+    # -------------------------------------------------
+    # CONFIRMATION EMAIL
+    # -------------------------------------------------
+
+    transaction.on_commit(
+        lambda: _safe_send_email(
+            send_order_confirmation_email,
+            order,
+        )
+    )
+
+    # -------------------------------------------------
+    # CLEAR AUTHENTICATED USER CART ONLY
+    #
+    # NEVER trust a client-provided guest session ID
+    # to delete another cart.
+    # -------------------------------------------------
+
+    if order.user:
+
+        cart = (
+            Cart.objects
+            .filter(user=order.user)
+            .first()
+        )
+
+        if cart:
+            cart.items.all().delete()
+
+    return True
+
+
+# =========================================================
+# INITIALIZE PAYMENT
+# =========================================================
 
 class InitializePaymentView(APIView):
+
     permission_classes = [AllowAny]
 
     def post(self, request, order_id):
-        checkout_token = request.data.get("checkout_token")
+
+        checkout_token = request.data.get(
+            "checkout_token"
+        )
 
         if not checkout_token:
+
             return Response(
-        {"error": "Checkout token is required"},
-        status=400
-    )
+                {
+                    "error": (
+                        "Checkout token is required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
-          order = Order.objects.get(
-           id=order_id,
-        checkout_token=checkout_token
-    )
+
+            order = (
+                Order.objects
+                .get(
+                    id=order_id,
+                    checkout_token=checkout_token,
+                )
+            )
+
         except Order.DoesNotExist:
-          return Response(
-        {"error": "Invalid order or checkout token"},
-        status=403
-    )
-        
+
+            return Response(
+                {
+                    "error": (
+                        "Invalid order or checkout token."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # -------------------------------------------------
+        # CANCELLED
+        # -------------------------------------------------
+
+        if order.status == "cancelled":
+
+            return Response(
+                {
+                    "error": (
+                        "Cancelled orders cannot be paid."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # ALREADY PAID
+        # -------------------------------------------------
 
         if order.payment_status == "paid":
+
             return Response(
                 {
                     "error": (
-                        "This order has already been paid for"
+                        "This order has already been paid for."
                     )
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not settings.PAYSTACK_SECRET_KEY:
+        # -------------------------------------------------
+        # REFUNDED
+        # -------------------------------------------------
+
+        if order.payment_status == "refunded":
+
             return Response(
                 {
                     "error": (
-                        "Paystack secret key is not configured"
+                        "A refunded order cannot be paid again."
                     )
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # -------------------------------------------------
+        # PREVENT DUPLICATE INITIALIZATION
+        # -------------------------------------------------
+
+        if (
+            order.payment_status == "pending"
+            and order.payment_reference
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "A payment has already been initialized "
+                        "for this order."
+                    ),
+                    "reference": order.payment_reference,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # -------------------------------------------------
+        # PAYSTACK KEY
+        # -------------------------------------------------
+
+        if not settings.PAYSTACK_SECRET_KEY:
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack secret key is not configured."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # -------------------------------------------------
+        # CREATE PAYMENT REFERENCE
+        # -------------------------------------------------
 
         payment_reference = (
             f"{order.order_number}-"
             f"{uuid.uuid4().hex[:12].upper()}"
         )
+
+        # -------------------------------------------------
+        # CALLBACK URL
+        # -------------------------------------------------
+
+        callback_url = getattr(
+            settings,
+            "PAYSTACK_CALLBACK_URL",
+            None,
+        )
+
+        if not callback_url:
+
+            return Response(
+                {
+                    "error": (
+                        "PAYSTACK_CALLBACK_URL is not configured."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # -------------------------------------------------
+        # PAYLOAD
+        # -------------------------------------------------
 
         payload = {
             "email": order.email,
@@ -627,19 +1166,18 @@ class InitializePaymentView(APIView):
             ),
             "currency": "NGN",
             "reference": payment_reference,
-
-            "callback_url": (
-                "http://localhost:3000/payment-callback"
-            ),
-
+            "callback_url": callback_url,
             "metadata": {
                 "order_id": order.id,
                 "order_number": order.order_number,
-                "checkout_token": str(order.checkout_token),
+                "checkout_token": str(
+                    order.checkout_token
+                ),
             },
         }
 
         try:
+
             response = requests.post(
                 "https://api.paystack.co/transaction/initialize",
                 headers={
@@ -656,33 +1194,72 @@ class InitializePaymentView(APIView):
             data = response.json()
 
         except requests.RequestException:
+
             return Response(
                 {
                     "error": (
-                        "Could not connect to Paystack"
+                        "Could not connect to Paystack."
                     )
                 },
-                status=status.HTTP_502_BAD_GATEWAY
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        if not response.ok or not data.get("status"):
+        if (
+            not response.ok
+            or not data.get("status")
+            or not data.get("data")
+        ):
+
             return Response(
                 {
                     "error": data.get(
                         "message",
-                        "Paystack initialization failed"
+                        "Paystack initialization failed.",
                     )
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        paystack_data = data["data"]
+
+        paystack_reference = paystack_data.get(
+            "reference"
+        )
+
+        access_code = paystack_data.get(
+            "access_code"
+        )
+
+        authorization_url = paystack_data.get(
+            "authorization_url"
+        )
+
+        if not all([
+            paystack_reference,
+            access_code,
+            authorization_url,
+        ]):
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack returned an incomplete "
+                        "payment initialization response."
+                    )
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
         order.payment_reference = (
-            data["data"]["reference"]
+            paystack_reference
         )
+
+        order.payment_status = "pending"
 
         order.save(
             update_fields=[
                 "payment_reference",
+                "payment_status",
                 "updated_at",
             ]
         )
@@ -690,71 +1267,135 @@ class InitializePaymentView(APIView):
         return Response({
             "order_id": order.id,
             "order_number": order.order_number,
-               "checkout_token": str(order.checkout_token),
-            "reference": data["data"]["reference"],
-            "access_code": data["data"]["access_code"],
-            "authorization_url": (
-                data["data"]["authorization_url"]
+            "checkout_token": str(
+                order.checkout_token
             ),
+            "reference": paystack_reference,
+            "access_code": access_code,
+            "authorization_url": authorization_url,
         })
 
-    
+
+# =========================================================
+# VERIFY PAYMENT
+# =========================================================
+
 class VerifyPaymentView(APIView):
+
     permission_classes = [AllowAny]
 
     @transaction.atomic
     def post(self, request):
-        reference = request.data.get("reference")
-        checkout_token = request.data.get("checkout_token")
+
+        reference = (
+            request.data.get("reference")
+            or ""
+        ).strip()
+
+        checkout_token = (
+            request.data.get("checkout_token")
+            or ""
+        ).strip()
 
         if not reference:
+
             return Response(
-                {"error": "reference is required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "reference is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not checkout_token:
+
             return Response(
-                {"error": "checkout_token is required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "checkout_token is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # -------------------------------------------------
+        # FIND ORDER BY CHECKOUT TOKEN
+        #
+        # Do NOT require the submitted reference to equal
+        # the current DB reference. Paystack may have a
+        # legitimate older transaction reference.
+        # -------------------------------------------------
+
         try:
+
             order = (
                 Order.objects
                 .select_for_update()
                 .get(
-                    payment_reference=reference,
-                     checkout_token=checkout_token
+                    checkout_token=checkout_token,
                 )
             )
+
         except Order.DoesNotExist:
+
             return Response(
-                {"error": "Order not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {
+                    "error": "Order not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
 
+        # -------------------------------------------------
+        # IDEMPOTENCY
+        # -------------------------------------------------
+
         if order.payment_status == "paid":
+
             return Response({
-                "message": "Payment already verified",
+                "message": "Payment already verified.",
                 "order": OrderSerializer(order).data,
             })
 
-        if not settings.PAYSTACK_SECRET_KEY:
+        if order.payment_status == "refunded":
+
             return Response(
                 {
                     "error": (
-                        "Paystack secret key is not configured"
+                        "This order has already been refunded."
                     )
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ---------------------------------
-        # VERIFY PAYMENT WITH PAYSTACK
-        # ---------------------------------
+        if order.status == "cancelled":
+
+            return Response(
+                {
+                    "error": (
+                        "Cancelled orders cannot be paid."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # PAYSTACK KEY
+        # -------------------------------------------------
+
+        if not settings.PAYSTACK_SECRET_KEY:
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack secret key is not configured."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # -------------------------------------------------
+        # VERIFY WITH PAYSTACK
+        # -------------------------------------------------
 
         try:
+
             response = requests.get(
                 (
                     "https://api.paystack.co/"
@@ -772,46 +1413,86 @@ class VerifyPaymentView(APIView):
             data = response.json()
 
         except requests.RequestException:
+
             return Response(
                 {
                     "error": (
-                        "Could not connect to Paystack"
+                        "Could not connect to Paystack."
                     )
                 },
-                status=status.HTTP_502_BAD_GATEWAY
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        if not response.ok or not data.get("status"):
+        if (
+            not response.ok
+            or not data.get("status")
+        ):
+
             return Response(
                 {
                     "error": data.get(
                         "message",
-                        "Payment verification failed"
+                        "Payment verification failed.",
                     )
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        payment = data.get("data", {})
-        if payment.get("reference") != reference:
-            return Response(
-        {
-            "error": "Paystack payment reference does not match the order."
-        },
-            status=status.HTTP_400_BAD_REQUEST
-    )
+        payment = data.get(
+            "data",
+            {}
+        )
 
-        # ---------------------------------
-        # CHECK PAYMENT STATUS
-        # ---------------------------------
+        # -------------------------------------------------
+        # VERIFY REFERENCE
+        # -------------------------------------------------
+
+        if payment.get("reference") != reference:
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack payment reference "
+                        "does not match the requested reference."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY METADATA
+        # -------------------------------------------------
+
+        if not _payment_metadata_matches_order(
+            order,
+            payment,
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Payment metadata does not match "
+                        "this order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY STATUS
+        # -------------------------------------------------
 
         if payment.get("status") != "success":
-            payment_status = payment.get("status")
+
+            payment_status = payment.get(
+                "status"
+            )
 
             if payment_status in [
                 "failed",
                 "abandoned",
             ]:
+
                 order.payment_status = "failed"
 
                 order.save(
@@ -823,316 +1504,178 @@ class VerifyPaymentView(APIView):
 
             return Response(
                 {
-                    "error": "Payment was not successful",
+                    "error": (
+                        "Payment was not successful."
+                    ),
                     "payment_status": payment_status,
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ---------------------------------
-        # VERIFY PAYMENT AMOUNT
-        # ---------------------------------
-
-        if payment.get("amount") != int(
-            order.total_amount * 100
-        ):
-            return Response(
-                {
-                    "error": (
-                        "Payment amount does not match "
-                        "the order amount"
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # ---------------------------------
-        # VERIFY CURRENCY
-        # ---------------------------------
-
-        if payment.get("currency") != "NGN":
-            return Response(
-                {
-                    "error": (
-                        "Payment currency does not match "
-                        "the order currency"
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # ---------------------------------
-        # CHECK AND LOCK STOCK
-        # ---------------------------------
-
-        for item in order.items.select_related(
-            "product",
-            "variant"
-        ).all():
-
-            if item.variant:
-                variant = (
-                    ProductVariant.objects
-                    .select_for_update()
-                    .get(pk=item.variant.pk)
-                )
-
-                if (
-                    not variant.in_stock
-                    or variant.stock_quantity < item.quantity
-                ):
-                    return Response(
-                        {
-                            "error": (
-                                f"Not enough stock for "
-                                f"{item.product_name} "
-                                f"{item.variant_size}"
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-            elif item.product:
-                product = (
-                    item.product.__class__.objects
-                    .select_for_update()
-                    .get(pk=item.product.pk)
-                )
-
-                if (
-                    not product.in_stock
-                    or product.stock_quantity < item.quantity
-                ):
-                    return Response(
-                        {
-                            "error": (
-                                f"Not enough stock for "
-                                f"{item.product_name}"
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-        # ---------------------------------
-        # REDUCE STOCK
-        # ---------------------------------
-
-        for item in order.items.select_related(
-            "product",
-            "variant"
-        ).all():
-
-            if item.variant:
-                variant = (
-                    ProductVariant.objects
-                    .select_for_update()
-                    .get(pk=item.variant.pk)
-                )
-
-                variant.stock_quantity -= item.quantity
-
-                if variant.stock_quantity <= 0:
-                    variant.stock_quantity = 0
-                    variant.in_stock = False
-
-                variant.save(
-                    update_fields=[
-                        "stock_quantity",
-                        "in_stock",
-                    ]
-                )
-
-            elif item.product:
-                product = (
-                    item.product.__class__.objects
-                    .select_for_update()
-                    .get(pk=item.product.pk)
-                )
-
-                product.stock_quantity -= item.quantity
-
-                if product.stock_quantity <= 0:
-                    product.stock_quantity = 0
-                    product.in_stock = False
-
-                product.save(
-                    update_fields=[
-                        "stock_quantity",
-                        "in_stock",
-                    ]
-                )
-
-        # ---------------------------------
-        # INCREASE COUPON USAGE
-        # ---------------------------------
-
-        if order.coupon_id:
-            coupon = (
-                Coupon.objects
-                .select_for_update()
-                .get(pk=order.coupon_id)
-            )
-
-            if (
-                coupon.usage_limit is not None
-                and coupon.used_count
-                >= coupon.usage_limit
-            ):
-                return Response(
-                    {
-                        "error": (
-                            "This coupon has reached "
-                            "its usage limit"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            coupon.used_count += 1
-
-            coupon.save(
-                update_fields=[
-                    "used_count"
-                ]
-            )
-
-            if order.user:
-                coupon.used_by.add(order.user)
-
-        # ---------------------------------
-        # MARK ORDER AS PAID
-        # ---------------------------------
-
-        old_status = order.status
-
-        order.payment_status = "paid"
-        order.status = "confirmed"
-        order.payment_reference = (
-            payment.get(
-                "reference",
-                reference
-            )
-        )
-
-        order.save(
-            update_fields=[
-                "payment_status",
-                "status",
-                "payment_reference",
-                "updated_at",
-            ]
-        )
-
-        # ---------------------------------
-        # ORDER STATUS HISTORY
-        # ---------------------------------
-
-        if old_status != order.status:
-            OrderStatusHistory.objects.create(
-                order=order,
-                status=order.status,
-                changed_by=None,
-                note="Payment confirmed",
-            )
-
-         # ---------------------------------
-         # SEND CONFIRMATION EMAIL
-         # ---------------------------------
-
-        print("ABOUT TO SEND ORDER EMAIL")
-        print("ORDER EMAIL:", order.email)
+        # -------------------------------------------------
+        # FINALIZE
+        # -------------------------------------------------
 
         try:
-            send_order_confirmation_email(order)
-            print("ORDER EMAIL FUNCTION FINISHED")
-        except Exception as e:
-            print("EMAIL ERROR:", repr(e))
-            
-        
 
-        # ---------------------------------
-        # CLEAR CART
-        # ---------------------------------
+            _finalize_successful_payment(
+                order,
+                payment,
+            )
 
-        guest_session_id = request.headers.get(
-            "X-Guest-Session-ID"
-        )
+        except Exception as exc:
 
-        if order.user:
-            cart = Cart.objects.filter(
-                user=order.user
-            ).first()
+            from rest_framework.exceptions import ValidationError
 
-        elif guest_session_id:
-            cart = Cart.objects.filter(
-                session_id=guest_session_id
-            ).first()
+            if isinstance(
+                exc,
+                ValidationError,
+            ):
 
-        else:
-            cart = None
+                detail = exc.detail
 
-        if cart:
-            cart.items.all().delete()
+                return Response(
+                    {
+                        "error": detail
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        # ---------------------------------
-        # SUCCESS RESPONSE
-        # ---------------------------------
+            raise
 
         return Response({
-            "message": "Payment verified successfully",
+            "message": (
+                "Payment verified successfully."
+            ),
             "order": OrderSerializer(order).data,
         })
+
+
+# =========================================================
+# ADMIN REFUND
+# =========================================================
+
 class AdminRefundPaymentView(APIView):
+
     permission_classes = [IsAdminUser]
 
     @transaction.atomic
     def post(self, request, order_id):
+
         try:
+
             order = (
                 Order.objects
                 .select_for_update()
-                .get(id=order_id)
+                .prefetch_related("items")
+                .select_related("user", "coupon")
+                .get(
+                    id=order_id
+                )
             )
+
         except Order.DoesNotExist:
+
             return Response(
-                {"error": "Order not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {
+                    "error": "Order not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
+
+        # -------------------------------------------------
+        # ONLY PAID ORDERS
+        # -------------------------------------------------
 
         if order.payment_status != "paid":
+
             return Response(
                 {
                     "error": (
-                        "Only paid orders can be refunded"
+                        "Only paid orders can be refunded."
                     )
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # -------------------------------------------------
+        # PAYMENT REFERENCE
+        # -------------------------------------------------
 
         if not order.payment_reference:
+
             return Response(
                 {
                     "error": (
-                        "This order has no payment reference"
+                        "This order has no payment reference."
                     )
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # -------------------------------------------------
+        # BLOCK DUPLICATE REFUNDS
+        # -------------------------------------------------
+
+        existing_refund = (
+            Refund.objects
+            .filter(
+                order=order,
+                status__in=[
+                    "pending",
+                    "processed",
+                ],
+            )
+            .first()
+        )
+
+        if existing_refund:
+
+            return Response(
+                {
+                    "error": (
+                        "A refund for this order already "
+                        "exists or is being processed."
+                    ),
+                    "refund_id": existing_refund.id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # -------------------------------------------------
+        # PAYSTACK KEY
+        # -------------------------------------------------
 
         if not settings.PAYSTACK_SECRET_KEY:
+
             return Response(
                 {
                     "error": (
-                        "Paystack secret key is not configured"
+                        "Paystack secret key is not configured."
                     )
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        reason = request.data.get(
-            "reason",
-            ""
+        reason = (
+            request.data.get(
+                "reason",
+                "Refund processed by admin",
+            )
+            or "Refund processed by admin"
         ).strip()
+
+        if len(reason) > 500:
+
+            return Response(
+                {
+                    "error": (
+                        "Refund reason cannot exceed "
+                        "500 characters."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         refund = Refund.objects.create(
             order=order,
@@ -1150,6 +1693,7 @@ class AdminRefundPaymentView(APIView):
         }
 
         try:
+
             response = requests.post(
                 "https://api.paystack.co/refund",
                 headers={
@@ -1166,7 +1710,9 @@ class AdminRefundPaymentView(APIView):
             data = response.json()
 
         except requests.RequestException:
+
             refund.status = "failed"
+
             refund.save(
                 update_fields=[
                     "status",
@@ -1177,15 +1723,20 @@ class AdminRefundPaymentView(APIView):
             return Response(
                 {
                     "error": (
-                        "Could not connect to Paystack"
+                        "Could not connect to Paystack."
                     ),
                     "refund_id": refund.id,
                 },
-                status=status.HTTP_502_BAD_GATEWAY
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        if not response.ok or not data.get("status"):
+        if (
+            not response.ok
+            or not data.get("status")
+        ):
+
             refund.status = "failed"
+
             refund.save(
                 update_fields=[
                     "status",
@@ -1197,12 +1748,16 @@ class AdminRefundPaymentView(APIView):
                 {
                     "error": data.get(
                         "message",
-                        "Refund request failed"
+                        "Refund request failed.",
                     ),
                     "refund_id": refund.id,
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # -------------------------------------------------
+        # SAVE REFUND
+        # -------------------------------------------------
 
         refund_data = data.get(
             "data",
@@ -1210,6 +1765,7 @@ class AdminRefundPaymentView(APIView):
         )
 
         refund.status = "processed"
+
         refund.paystack_reference = (
             refund_data.get(
                 "transaction_reference"
@@ -1228,35 +1784,87 @@ class AdminRefundPaymentView(APIView):
             ]
         )
 
+        # -------------------------------------------------
+        # RESTORE STOCK + COUPON
+        # -------------------------------------------------
+
+        _restore_order_inventory_and_coupon(
+            order
+        )
+
+        # -------------------------------------------------
+        # UPDATE ORDER
+        # -------------------------------------------------
+
         order.payment_status = "refunded"
+        order.status = "cancelled"
 
         order.save(
             update_fields=[
                 "payment_status",
+                "status",
                 "updated_at",
             ]
         )
 
+        # -------------------------------------------------
+        # STATUS HISTORY
+        # -------------------------------------------------
+
+        OrderStatusHistory.objects.create(
+            order=order,
+            status="cancelled",
+            changed_by=request.user,
+            note="Payment refunded by admin.",
+        )
+
+        # -------------------------------------------------
+        # REFUND EMAIL
+        # -------------------------------------------------
+
+        def send_refund_email_after_commit():
+
+            try:
+
+                from .email import (
+                    send_order_refund_email
+                )
+
+                send_order_refund_email(
+                    order,
+                    refund,
+                )
+
+            
+
+        transaction.on_commit(
+            send_refund_email_after_commit
+        )
+
         return Response({
-            "message": "Refund processed successfully",
-            "refund": {
-                "id": refund.id,
-                "amount": str(refund.amount),
-                "reason": refund.reason,
-                "status": refund.status,
-                "paystack_reference": (
-                    refund.paystack_reference
-                ),
-                "created_at": refund.created_at,
-            },
-            "order": OrderSerializer(order).data,
+            "message": (
+                "Payment refunded successfully."
+            ),
+            "refund_id": refund.id,
+            "order_id": order.id,
+            "payment_status": order.payment_status,
+            "status": order.status,
         })
 
-class AdminRefundListView(generics.ListAPIView):
+
+# =========================================================
+# ADMIN REFUND LIST
+# =========================================================
+
+class AdminRefundListView(
+    generics.ListAPIView
+):
+
     serializer_class = RefundSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
+
         queryset = (
             Refund.objects
             .select_related(
@@ -1267,387 +1875,367 @@ class AdminRefundListView(generics.ListAPIView):
             .order_by("-created_at")
         )
 
-        status_filter = self.request.query_params.get(
-            "status"
+        status_filter = (
+            self.request.query_params.get(
+                "status"
+            )
         )
 
         if status_filter:
+
             queryset = queryset.filter(
                 status=status_filter
             )
 
         return queryset
-        
+
+
+# =========================================================
+# PAYSTACK WEBHOOK
+# =========================================================
+
 class PaystackWebhookView(APIView):
+
+    permission_classes = [AllowAny]
+
     authentication_classes = []
-    permission_classes = []
 
     @transaction.atomic
     def post(self, request):
 
-        # -----------------------------
-        # VERIFY PAYSTACK SIGNATURE
-        # -----------------------------
+        # -------------------------------------------------
+        # PAYSTACK SIGNATURE
+        # -------------------------------------------------
 
         signature = request.headers.get(
             "x-paystack-signature"
         )
 
         if not signature:
-            return HttpResponse(
-                "Missing signature",
-                status=400
+
+            return Response(
+                {
+                    "error": "Missing Paystack signature."
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not settings.PAYSTACK_SECRET_KEY:
-            return HttpResponse(
-                "Paystack secret key is not configured",
-                status=500
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack secret key is not configured."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         expected_signature = hmac.new(
-            settings.PAYSTACK_SECRET_KEY.encode("utf-8"),
+            settings.PAYSTACK_SECRET_KEY.encode(
+                "utf-8"
+            ),
             request.body,
-            hashlib.sha512
+            hashlib.sha512,
         ).hexdigest()
 
         if not hmac.compare_digest(
             signature,
-            expected_signature
+            expected_signature,
         ):
-            return HttpResponse(
-                "Invalid signature",
-                status=401
+
+            return Response(
+                {
+                    "error": "Invalid webhook signature."
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # -----------------------------
-        # GET PAYSTACK EVENT
-        # -----------------------------
-
-        event = request.data
-
-        if event.get("event") != "charge.success":
-            return HttpResponse(
-                "Event ignored",
-                status=200
-            )
-
-        payment = event.get("data", {})
-
-        reference = payment.get("reference")
-
-        if not reference:
-            return HttpResponse(
-                "Missing payment reference",
-                status=400
-            )
-
-        # -----------------------------
-        # FIND ORDER
-        # -----------------------------
+        # -------------------------------------------------
+        # PARSE BODY
+        # -------------------------------------------------
 
         try:
-            order = (
-                Order.objects
-                .select_for_update()
-                .get(
-                    payment_reference=reference
-                )
+
+            import json
+
+            payload = json.loads(
+                request.body.decode("utf-8")
             )
 
-        except Order.DoesNotExist:
+        except (
+            ValueError,
+            UnicodeDecodeError,
+        ):
+
+            return Response(
+                {
+                    "error": "Invalid webhook payload."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        event = payload.get(
+            "event"
+        )
+
+        # -------------------------------------------------
+        # ONLY PROCESS SUCCESSFUL CHARGES
+        # -------------------------------------------------
+
+        if event != "charge.success":
+
+            return Response(
+                {
+                    "message": "Event ignored."
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        payment = payload.get(
+            "data",
+            {}
+        )
+
+        reference = payment.get(
+            "reference"
+        )
+
+        if not reference:
+
+            return Response(
+                {
+                    "error": (
+                        "Payment reference is missing."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # FIND ORDER
+        # -------------------------------------------------
+
+        order = (
+            Order.objects
+            .select_for_update()
+            .filter(
+                payment_reference=reference
+            )
+            .first()
+        )
+
+        # -------------------------------------------------
+        # FALLBACK TO METADATA
+        #
+        # This allows a legitimate Paystack payment to
+        # still resolve even if the order reference was
+        # changed before webhook processing.
+        # -------------------------------------------------
+
+        if not order:
+
+            metadata = _get_payment_metadata(
+                payment
+            )
+
+            order_id = metadata.get(
+                "order_id"
+            )
+
+            checkout_token = metadata.get(
+                "checkout_token"
+            )
+
+            if (
+                not order_id
+                or not checkout_token
+            ):
+
+                return Response(
+                    {
+                        "error": (
+                            "Order could not be identified "
+                            "from payment metadata."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             try:
+
                 order = (
                     Order.objects
                     .select_for_update()
                     .get(
-                         payment_reference=reference
+                        id=order_id,
+                        checkout_token=checkout_token,
                     )
                 )
 
             except Order.DoesNotExist:
-                return HttpResponse(
-                    "Order not found",
-                    status=404
+
+                return Response(
+                    {
+                        "error": "Order not found."
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
                 )
 
-        # -----------------------------
-        # PREVENT DUPLICATE PROCESSING
-        # -----------------------------
+        # -------------------------------------------------
+        # IDEMPOTENCY
+        # -------------------------------------------------
 
         if order.payment_status == "paid":
-            return HttpResponse(
-                "Payment already processed",
-                status=200
+
+            return Response(
+                {
+                    "message": "Webhook already processed."
+                },
+                status=status.HTTP_200_OK,
             )
 
-        # -----------------------------
+        if order.payment_status == "refunded":
+
+            return Response(
+                {
+                    "message": (
+                        "Order has already been refunded."
+                    )
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if order.status == "cancelled":
+
+            return Response(
+                {
+                    "message": (
+                        "Cancelled order ignored."
+                    )
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # -------------------------------------------------
+        # VERIFY REFERENCE
+        # -------------------------------------------------
+
+        if payment.get("reference") != reference:
+
+            return Response(
+                {
+                    "error": (
+                        "Invalid payment reference."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
         # VERIFY PAYMENT STATUS
-        # -----------------------------
+        # -------------------------------------------------
 
         if payment.get("status") != "success":
-            return HttpResponse(
-                "Payment was not successful",
-                status=400
+
+            return Response(
+                {
+                    "message": (
+                        "Payment is not successful."
+                    )
+                },
+                status=status.HTTP_200_OK,
             )
 
-        # -----------------------------
+        # -------------------------------------------------
+        # VERIFY METADATA
+        # -------------------------------------------------
+
+        if not _payment_metadata_matches_order(
+            order,
+            payment,
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Payment metadata does not match "
+                        "the order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
         # VERIFY AMOUNT
-        # -----------------------------
+        # -------------------------------------------------
 
         expected_amount = int(
             order.total_amount * 100
         )
 
         if payment.get("amount") != expected_amount:
-            return HttpResponse(
-                "Payment amount does not match order",
-                status=400
+
+            return Response(
+                {
+                    "error": (
+                        "Payment amount does not match "
+                        "the order amount."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # -----------------------------
+        # -------------------------------------------------
         # VERIFY CURRENCY
-        # -----------------------------
+        # -------------------------------------------------
 
         if payment.get("currency") != "NGN":
-            return HttpResponse(
-                "Payment currency does not match order",
-                status=400
+
+            return Response(
+                {
+                    "error": (
+                        "Payment currency does not match "
+                        "the order currency."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # -----------------------------
-        # CHECK AND LOCK STOCK
-        # -----------------------------
+        # -------------------------------------------------
+        # FINALIZE PAYMENT
+        # -------------------------------------------------
 
-        for item in order.items.select_related(
-            "product",
-            "variant"
-        ).all():
-
-            if item.variant:
-
-                variant = (
-                    ProductVariant.objects
-                    .select_for_update()
-                    .get(
-                        pk=item.variant.pk
-                    )
-                )
-
-                if (
-                    not variant.in_stock
-                    or variant.stock_quantity < item.quantity
-                ):
-                    return HttpResponse(
-                        (
-                            f"Not enough stock for "
-                            f"{item.product_name} "
-                            f"{item.variant_size}"
-                        ),
-                        status=400
-                    )
-
-            elif item.product:
-
-                product = (
-                    item.product.__class__.objects
-                    .select_for_update()
-                    .get(
-                        pk=item.product.pk
-                    )
-                )
-
-                if (
-                    not product.in_stock
-                    or product.stock_quantity < item.quantity
-                ):
-                    return HttpResponse(
-                        (
-                            f"Not enough stock for "
-                            f"{item.product_name}"
-                        ),
-                        status=400
-                    )
-
-        # -----------------------------
-        # REDUCE STOCK
-        # -----------------------------
-
-        for item in order.items.select_related(
-            "product",
-            "variant"
-        ).all():
-
-            if item.variant:
-
-                variant = (
-                    ProductVariant.objects
-                    .select_for_update()
-                    .get(
-                        pk=item.variant.pk
-                    )
-                )
-
-                variant.stock_quantity -= item.quantity
-
-                if variant.stock_quantity <= 0:
-                    variant.stock_quantity = 0
-                    variant.in_stock = False
-
-                variant.save(
-                    update_fields=[
-                        "stock_quantity",
-                        "in_stock",
-                    ]
-                )
-
-            elif item.product:
-
-                product = (
-                    item.product.__class__.objects
-                    .select_for_update()
-                    .get(
-                        pk=item.product.pk
-                    )
-                )
-
-                product.stock_quantity -= item.quantity
-
-                if product.stock_quantity <= 0:
-                    product.stock_quantity = 0
-                    product.in_stock = False
-
-                product.save(
-                    update_fields=[
-                        "stock_quantity",
-                        "in_stock",
-                    ]
-                )
-
-        # -----------------------------
-        # INCREASE COUPON USAGE
-        # -----------------------------
-
-        if order.coupon_id:
-
-            coupon = (
-                Coupon.objects
-                .select_for_update()
-                .get(
-                    pk=order.coupon_id
-                )
-            )
-
-            if (
-                coupon.usage_limit is not None
-                and coupon.used_count
-                >= coupon.usage_limit
-            ):
-                return HttpResponse(
-                    "This coupon has reached its usage limit",
-                    status=400
-                )
-
-            coupon.used_count += 1
-
-            coupon.save(
-                update_fields=[
-                    "used_count"
-                ]
-            )
-
-            if order.user:
-                coupon.used_by.add(
-                    order.user
-                )
-
-        # -----------------------------
-        # MARK ORDER AS PAID
-        # -----------------------------
-
-        old_status = order.status
-
-        order.payment_status = "paid"
-        order.status = "confirmed"
-        order.payment_reference = (
-            payment.get(
-                "reference",
-                reference
-            )
-        )
-
-        order.save(
-            update_fields=[
-                "payment_status",
-                "status",
-                "payment_reference",
-                "updated_at",
-            ]
-        )
-
-        # -----------------------------
-        # ORDER STATUS HISTORY
-        # -----------------------------
-
-        if old_status != order.status:
-
-            OrderStatusHistory.objects.create(
-                order=order,
-                status=order.status,
-                changed_by=None,
-                note=(
-                    "Payment confirmed "
-                    "via Paystack webhook"
-                ),
-            )
-
-        # -----------------------------
-        # SEND CONFIRMATION EMAIL
-        # -----------------------------
+        from rest_framework.exceptions import ValidationError
 
         try:
-          send_order_confirmation_email(order)
-        except Exception as e:
-          print("EMAIL ERROR:", repr(e))
-        
 
-        # -----------------------------
-        # CLEAR CART
-        # -----------------------------
+            _finalize_successful_payment(
+                order,
+                payment,
+            )
 
-        if order.user:
+        except ValidationError as exc:
 
-            cart = Cart.objects.filter(
-                user=order.user
-            ).first()
+            return Response(
+                {
+                    "error": exc.detail
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        else:
-
-            # Guest orders are handled by
-            # VerifyPaymentView using the
-            # guest session header.
-            #
-            # Paystack webhooks do not contain
-            # the browser's guest session ID,
-            # so we do not attempt to identify
-            # a guest cart here.
-
-            cart = None
-
-        if cart:
-            cart.items.all().delete()
-
-        # -----------------------------
+        # -------------------------------------------------
         # SUCCESS
-        # -----------------------------
+        # -------------------------------------------------
 
-        return HttpResponse(
-            "Webhook processed successfully",
-            status=200
+        return Response(
+            {
+                "message": (
+                    "Webhook processed successfully."
+                )
+            },
+            status=status.HTTP_200_OK,
         )
-
-    
 class OrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
@@ -2267,12 +2855,6 @@ class CreateOrderView(APIView):
                 status=status.HTTP_201_CREATED,
             )
 
-        except Exception as e:
-
-            print(
-                "CREATE ORDER ERROR:",
-                repr(e)
-            )
 
             return Response(
                 {

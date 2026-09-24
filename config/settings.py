@@ -59,6 +59,7 @@ INSTALLED_APPS = [
 
     'rest_framework',
     'corsheaders',
+    'rest_framework_simplejwt.token_blacklist',
     'products',
     'orders',
     'users',
@@ -178,10 +179,20 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 12,
 }
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+
+    "UPDATE_LAST_LOGIN": True,
+
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+PAYSTACK_CALLBACK_URL = os.getenv(
+    "PAYSTACK_CALLBACK_URL"
+)
 # Email settings
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 

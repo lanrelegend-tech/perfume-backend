@@ -225,6 +225,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "payment_reference",
             "shipped_at",
             "delivered_at",
+            "payment_status",
             "created_at",
             "updated_at",
             "status_history",
@@ -261,6 +262,9 @@ class RefundSerializer(serializers.ModelSerializer):
 
         read_only_fields = [
             "id",
+            "order",
+
+    "amount",
             "processed_by",
             "admin_name",
             "paystack_reference",
