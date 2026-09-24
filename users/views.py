@@ -61,13 +61,7 @@ def send_orentemist_email(
     footer_message=None,
 ):
     """
-    Sends branded ORENTEMIST HTML emails through Resend.
-
-    The email contains:
-    - ORENTEMIST branding
-    - Luxury black/white styling
-    - Verification/reset code when provided
-    - Plain-text fallback
+    Sends premium branded ORENTEMIST emails through Resend.
     """
 
     code_block = ""
@@ -75,29 +69,30 @@ def send_orentemist_email(
     if code:
         code_block = f"""
         <div style="
-            margin: 30px 0;
-            padding: 28px 20px;
-            background: #f8f7f4;
-            border: 1px solid #e5e2dc;
+            margin: 32px 0;
+            padding: 30px 20px;
+            background: #f7f5f1;
+            border: 1px solid #e4e0d8;
             border-radius: 18px;
             text-align: center;
         ">
+
             <p style="
                 margin: 0 0 12px;
-                color: #777777;
+                color: #8b877f;
                 font-size: 10px;
                 font-weight: 700;
                 letter-spacing: 3px;
                 text-transform: uppercase;
             ">
-                Your Security Code
+                Your Verification Code
             </p>
 
             <div style="
                 font-size: 38px;
                 font-weight: 700;
                 letter-spacing: 9px;
-                color: #000000;
+                color: #111111;
                 line-height: 1.2;
             ">
                 {code}
@@ -105,11 +100,12 @@ def send_orentemist_email(
 
             <p style="
                 margin: 14px 0 0;
-                color: #888888;
+                color: #8b877f;
                 font-size: 12px;
             ">
                 This code expires in 10 minutes.
             </p>
+
         </div>
         """
 
@@ -127,19 +123,22 @@ def send_orentemist_email(
     html = f"""
     <!DOCTYPE html>
     <html>
+
     <head>
         <meta charset="UTF-8">
+
         <meta
             name="viewport"
             content="width=device-width, initial-scale=1.0"
         >
+
         <title>{subject}</title>
     </head>
 
     <body style="
         margin: 0;
         padding: 0;
-        background: #f4f3f0;
+        background: #f2f1ee;
         font-family: Arial, Helvetica, sans-serif;
         color: #111111;
     ">
@@ -151,35 +150,38 @@ def send_orentemist_email(
         ">
 
             <div style="
-                max-width: 560px;
+                max-width: 580px;
                 margin: 0 auto;
                 background: #ffffff;
-                border: 1px solid #e8e6e1;
+                border: 1px solid #e5e2dc;
                 border-radius: 24px;
                 overflow: hidden;
             ">
 
-                <!-- HEADER -->
+                <!-- =================================================
+                     HEADER
+                ================================================== -->
 
                 <div style="
-                    padding: 34px 30px 30px;
-                    border-bottom: 1px solid #eeeeee;
+                    padding: 38px 30px 32px;
                     text-align: center;
+                    border-bottom: 1px solid #eeeeee;
                 ">
 
                     <div style="
-                        font-size: 21px;
+                        font-size: 23px;
                         font-weight: 700;
-                        letter-spacing: 5px;
+                        letter-spacing: 6px;
                         color: #000000;
                     ">
                         ORENTEMIST
                     </div>
 
                     <div style="
-                        margin-top: 9px;
-                        color: #999999;
+                        margin-top: 10px;
+                        color: #9a968f;
                         font-size: 9px;
+                        font-weight: 600;
                         letter-spacing: 3px;
                         text-transform: uppercase;
                     ">
@@ -188,15 +190,18 @@ def send_orentemist_email(
 
                 </div>
 
-                <!-- CONTENT -->
+
+                <!-- =================================================
+                     MAIN CONTENT
+                ================================================== -->
 
                 <div style="
-                    padding: 42px 35px;
+                    padding: 44px 35px 40px;
                 ">
 
                     <p style="
                         margin: 0 0 12px;
-                        color: #999999;
+                        color: #9a968f;
                         font-size: 10px;
                         font-weight: 700;
                         letter-spacing: 3px;
@@ -206,8 +211,8 @@ def send_orentemist_email(
                     </p>
 
                     <h1 style="
-                        margin: 0 0 18px;
-                        font-size: 29px;
+                        margin: 0 0 20px;
+                        font-size: 30px;
                         line-height: 1.3;
                         font-weight: 600;
                         letter-spacing: -0.5px;
@@ -218,9 +223,9 @@ def send_orentemist_email(
 
                     <p style="
                         margin: 0;
-                        color: #666666;
+                        color: #626262;
                         font-size: 15px;
-                        line-height: 1.8;
+                        line-height: 1.85;
                     ">
                         {message}
                     </p>
@@ -229,33 +234,158 @@ def send_orentemist_email(
 
                     <p style="
                         margin: 25px 0 0;
-                        color: #888888;
+                        color: #858585;
                         font-size: 12px;
-                        line-height: 1.7;
+                        line-height: 1.8;
                     ">
                         {footer}
                     </p>
 
                 </div>
 
-                <!-- FOOTER -->
+
+                <!-- =================================================
+                     BRAND FOOTER
+                ================================================== -->
 
                 <div style="
-                    padding: 27px 30px;
-                    background: #faf9f7;
+                    padding: 32px 25px;
+                    background: #faf9f6;
                     border-top: 1px solid #eeeeee;
                     text-align: center;
                 ">
 
                     <p style="
-                        margin: 0;
-                        color: #999999;
+                        margin: 0 0 15px;
+                        color: #111111;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: 2px;
+                    ">
+                        ORENTEMIST
+                    </p>
+
+                    <p style="
+                        margin: 0 0 18px;
+                        color: #777777;
                         font-size: 11px;
+                        line-height: 1.8;
+                    ">
+                        The Art of Fragrance
+                        <br>
+                        Crafted for those who leave an impression.
+                    </p>
+
+                    <p style="
+                        margin: 0 0 8px;
+                        color: #555555;
+                        font-size: 11px;
+                        line-height: 1.8;
+                    ">
+                        <strong>Visit Us</strong>
+                        <br>
+                        22 Oyun, Ilorin, Kwara State, Nigeria
+                    </p>
+
+                    <p style="
+                        margin: 0 0 8px;
+                        color: #555555;
+                        font-size: 11px;
+                        line-height: 1.8;
+                    ">
+                        <strong>Call / WhatsApp</strong>
+                        <br>
+                        09153242202
+                    </p>
+
+                    <p style="
+                        margin: 0 0 18px;
+                        color: #555555;
+                        font-size: 11px;
+                        line-height: 1.8;
+                    ">
+                        <strong>Email</strong>
+                        <br>
+                        lanrelegend@gmail.com
+                    </p>
+
+
+                    <!-- SOCIAL MEDIA -->
+
+                    <p style="
+                        margin: 18px 0 0;
+                        color: #999999;
+                        font-size: 10px;
+                        letter-spacing: 1px;
+                    ">
+                        FOLLOW ORENTEMIST
+                    </p>
+
+                    <p style="
+                        margin: 9px 0 0;
+                        font-size: 11px;
+                    ">
+                        <a
+                            href="https://instagram.com/lanre_legend"
+                            style="
+                                color: #111111;
+                                text-decoration: none;
+                                font-weight: 600;
+                            "
+                        >
+                            Instagram @lanre_legend
+                        </a>
+                    </p>
+
+                    <p style="
+                        margin: 7px 0 0;
+                        font-size: 11px;
+                    ">
+                        <a
+                            href="https://tiktok.com/@lanre_legend"
+                            style="
+                                color: #111111;
+                                text-decoration: none;
+                                font-weight: 600;
+                            "
+                        >
+                            TikTok @lanre_legend
+                        </a>
+                    </p>
+
+                    <p style="
+                        margin: 7px 0 0;
+                        font-size: 11px;
+                    ">
+                        <a
+                            href="https://orentemist.online"
+                            style="
+                                color: #111111;
+                                text-decoration: none;
+                                font-weight: 600;
+                            "
+                        >
+                            orentemist.online
+                        </a>
+                    </p>
+
+
+                    <div style="
+                        margin: 25px auto 0;
+                        width: 45px;
+                        height: 1px;
+                        background: #d8d5cf;
+                    "></div>
+
+                    <p style="
+                        margin: 18px 0 0;
+                        color: #aaa7a0;
+                        font-size: 10px;
                         line-height: 1.7;
                     ">
                         © ORENTEMIST
                         <br>
-                        Crafted for those who leave an impression.
+                        All rights reserved.
                     </p>
 
                 </div>
@@ -265,36 +395,44 @@ def send_orentemist_email(
         </div>
 
     </body>
+
     </html>
     """
 
     code_text = (
-        f"Your security code: {code}\n\n"
+        f"Your verification code: {code}\n\n"
         if code
         else ""
     )
 
     plain_text = (
-        "ORENTEMIST\n\n"
+        "ORENTEMIST — The Art of Fragrance\n\n"
         f"{heading}\n\n"
         f"{message}\n\n"
         f"{code_text}"
         f"{expiry_text}\n\n"
         f"{footer}\n\n"
-        "ORENTEMIST Customer Support"
+        "ORENTEMIST\n"
+        "22 Oyun, Ilorin, Kwara State, Nigeria\n"
+        "Phone: 09153242202\n"
+        "Email: lanrelegend@gmail.com\n"
+        "Instagram: @lanre_legend\n"
+        "TikTok: @lanre_legend\n"
+        "Website: https://orentemist.online\n"
     )
 
     resend.api_key = settings.RESEND_API_KEY
 
     resend.Emails.send(
         {
-            "from": "ORENTEMIST <onboarding@resend.dev>",
+           "from": "ORENTEMIST <hello@orentemist.online>",
             "to": [to_email],
             "subject": subject,
             "html": html,
             "text": plain_text,
         }
     )
+
 
 
 # =========================================================
@@ -363,8 +501,21 @@ class RegisterView(generics.CreateAPIView):
 
         verification, created = (
             EmailVerificationCode.objects.get_or_create(
-                user=user
+                user=user,
+                defaults={
+                    "expires_at": (
+                        timezone.now()
+                        + timedelta(minutes=10)
+                    ),
+                },
             )
+        )
+
+        # Give every new verification code
+        # a fresh 10-minute expiration time.
+        verification.expires_at = (
+            timezone.now()
+            + timedelta(minutes=10)
         )
 
         code = verification.generate_code()
@@ -377,9 +528,11 @@ class RegisterView(generics.CreateAPIView):
                 heading="Welcome to ORENTEMIST.",
                 message=(
                     f"Hello {user.first_name or user.username}, "
-                    "thank you for creating your account. "
-                    "Use the security code below to verify "
-                    "your email and complete your registration."
+                    "welcome to ORENTEMIST. "
+                    "We are delighted to have you with us. "
+                    "Your signature scent journey begins here. "
+                    "Use the security code below to verify your email "
+                    "and step into the world of ORENTEMIST."
                 ),
                 code=code,
                 footer_message=(
@@ -390,8 +543,6 @@ class RegisterView(generics.CreateAPIView):
 
         except Exception:
             raise
-
-
 # =========================================================
 # VERIFY EMAIL
 # =========================================================
