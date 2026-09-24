@@ -90,7 +90,7 @@ class AdminOrderDetailView(
             Order.objects
             .select_for_update()
             .prefetch_related("items")
-            .select_related("user")
+            
             .get(pk=self.get_object().pk)
         )
 
