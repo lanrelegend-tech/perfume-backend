@@ -465,7 +465,6 @@ def send_orentemist_email(
 
     return response
 
-
 # =========================================================
 # ORDER CONFIRMATION
 # =========================================================
@@ -477,7 +476,17 @@ def send_order_confirmation_email(order):
         f"{order.order_number}"
     )
 
-    if order.delivery_method == "pickup":
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
+
+    # =====================================================
+    # SHIPPING / PICKUP INFORMATION
+    # =====================================================
+
+    if getattr(order, "delivery_method", "delivery") == "pickup":
 
         fulfillment_message = (
             "Your fragrance is now being prepared for "
@@ -487,7 +496,11 @@ def send_order_confirmation_email(order):
 
         fulfillment_details = (
             "Pickup Location",
-            order.pickup_address
+            getattr(
+                order,
+                "pickup_address",
+                None
+            )
             or "Pickup location will be provided by ORENTEMIST.",
         )
 
@@ -498,16 +511,28 @@ def send_order_confirmation_email(order):
             "delivery to the address provided below."
         )
 
-        fulfillment_details = (
-            "Delivery Address",
-            f"{order.address}, {order.city}, {order.state}",
+        shipping_address_parts = [
+            getattr(order, "address", ""),
+            getattr(order, "city", ""),
+            getattr(order, "state", ""),
+            getattr(order, "country", ""),
+        ]
+
+        shipping_address = ", ".join(
+            str(part).strip()
+            for part in shipping_address_parts
+            if part
         )
 
-    first_name = (
-        order.full_name.split()[0]
-        if order.full_name
-        else "there"
-    )
+        fulfillment_details = (
+            "Shipping Address",
+            shipping_address
+            or "Shipping address was not provided.",
+        )
+
+    # =====================================================
+    # SEND EMAIL
+    # =====================================================
 
     return send_orentemist_email(
         to_email=order.email,
@@ -539,6 +564,18 @@ def send_order_confirmation_email(order):
             (
                 "Order Number",
                 order.order_number,
+            ),
+            (
+                "Customer",
+                order.full_name,
+            ),
+            (
+                "Phone",
+                order.phone,
+            ),
+            (
+                "Email",
+                order.email,
             ),
             (
                 "Total",
