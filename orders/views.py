@@ -2844,18 +2844,21 @@ class CreateOrderView(APIView):
             # ---------------------------------
 
             return Response(
-                {
-                    "message": (
-                        "Order created successfully."
-                    ),
-                    "order": (
-                        OrderSerializer(
-                            order
-                        ).data
-                    ),
-                },
-                status=status.HTTP_201_CREATED,
-            )
+    {
+        "message": (
+            "Order created successfully."
+        ),
+        "order": {
+            **OrderSerializer(
+                order
+            ).data,
+            "checkout_token": str(
+                order.checkout_token
+            ),
+        },
+    },
+    status=status.HTTP_201_CREATED,
+)
 
         except Exception as e:
 
