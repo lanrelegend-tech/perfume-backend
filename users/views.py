@@ -7,7 +7,6 @@ from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Q, Count, Sum
 from django.utils import timezone
@@ -50,6 +49,255 @@ from .serializers import (
 
 
 # =========================================================
+# ORENTEMIST EMAIL HELPER
+# =========================================================
+
+def send_orentemist_email(
+    to_email,
+    subject,
+    heading,
+    message,
+    code=None,
+    footer_message=None,
+):
+    """
+    Sends branded ORENTEMIST HTML emails through Resend.
+
+    The email contains:
+    - ORENTEMIST branding
+    - Luxury black/white styling
+    - Verification/reset code when provided
+    - Plain-text fallback
+    """
+
+    code_block = ""
+
+    if code:
+        code_block = f"""
+        <div style="
+            margin: 30px 0;
+            padding: 28px 20px;
+            background: #f8f7f4;
+            border: 1px solid #e5e2dc;
+            border-radius: 18px;
+            text-align: center;
+        ">
+            <p style="
+                margin: 0 0 12px;
+                color: #777777;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 3px;
+                text-transform: uppercase;
+            ">
+                Your Security Code
+            </p>
+
+            <div style="
+                font-size: 38px;
+                font-weight: 700;
+                letter-spacing: 9px;
+                color: #000000;
+                line-height: 1.2;
+            ">
+                {code}
+            </div>
+
+            <p style="
+                margin: 14px 0 0;
+                color: #888888;
+                font-size: 12px;
+            ">
+                This code expires in 10 minutes.
+            </p>
+        </div>
+        """
+
+    footer = footer_message or (
+        "If you did not request this email, "
+        "you can safely ignore it."
+    )
+
+    expiry_text = (
+        "This code expires in 10 minutes."
+        if code
+        else ""
+    )
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+        <title>{subject}</title>
+    </head>
+
+    <body style="
+        margin: 0;
+        padding: 0;
+        background: #f4f3f0;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #111111;
+    ">
+
+        <div style="
+            width: 100%;
+            padding: 45px 15px;
+            box-sizing: border-box;
+        ">
+
+            <div style="
+                max-width: 560px;
+                margin: 0 auto;
+                background: #ffffff;
+                border: 1px solid #e8e6e1;
+                border-radius: 24px;
+                overflow: hidden;
+            ">
+
+                <!-- HEADER -->
+
+                <div style="
+                    padding: 34px 30px 30px;
+                    border-bottom: 1px solid #eeeeee;
+                    text-align: center;
+                ">
+
+                    <div style="
+                        font-size: 21px;
+                        font-weight: 700;
+                        letter-spacing: 5px;
+                        color: #000000;
+                    ">
+                        ORENTEMIST
+                    </div>
+
+                    <div style="
+                        margin-top: 9px;
+                        color: #999999;
+                        font-size: 9px;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
+
+                </div>
+
+                <!-- CONTENT -->
+
+                <div style="
+                    padding: 42px 35px;
+                ">
+
+                    <p style="
+                        margin: 0 0 12px;
+                        color: #999999;
+                        font-size: 10px;
+                        font-weight: 700;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        ORENTEMIST
+                    </p>
+
+                    <h1 style="
+                        margin: 0 0 18px;
+                        font-size: 29px;
+                        line-height: 1.3;
+                        font-weight: 600;
+                        letter-spacing: -0.5px;
+                        color: #111111;
+                    ">
+                        {heading}
+                    </h1>
+
+                    <p style="
+                        margin: 0;
+                        color: #666666;
+                        font-size: 15px;
+                        line-height: 1.8;
+                    ">
+                        {message}
+                    </p>
+
+                    {code_block}
+
+                    <p style="
+                        margin: 25px 0 0;
+                        color: #888888;
+                        font-size: 12px;
+                        line-height: 1.7;
+                    ">
+                        {footer}
+                    </p>
+
+                </div>
+
+                <!-- FOOTER -->
+
+                <div style="
+                    padding: 27px 30px;
+                    background: #faf9f7;
+                    border-top: 1px solid #eeeeee;
+                    text-align: center;
+                ">
+
+                    <p style="
+                        margin: 0;
+                        color: #999999;
+                        font-size: 11px;
+                        line-height: 1.7;
+                    ">
+                        © ORENTEMIST
+                        <br>
+                        Crafted for those who leave an impression.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </body>
+    </html>
+    """
+
+    code_text = (
+        f"Your security code: {code}\n\n"
+        if code
+        else ""
+    )
+
+    plain_text = (
+        "ORENTEMIST\n\n"
+        f"{heading}\n\n"
+        f"{message}\n\n"
+        f"{code_text}"
+        f"{expiry_text}\n\n"
+        f"{footer}\n\n"
+        "ORENTEMIST Customer Support"
+    )
+
+    resend.api_key = settings.RESEND_API_KEY
+
+    resend.Emails.send(
+        {
+            "from": "ORENTEMIST <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": plain_text,
+        }
+    )
+
+
+# =========================================================
 # REGISTER
 # =========================================================
 
@@ -79,6 +327,7 @@ class RegisterView(generics.CreateAPIView):
 
         try:
             self.perform_create(serializer)
+
         except Exception:
             return Response(
                 {
@@ -122,25 +371,21 @@ class RegisterView(generics.CreateAPIView):
 
         try:
 
-            resend.api_key = settings.RESEND_API_KEY
-
-            resend.Emails.send(
-                {
-                    "from": "ORENTEMIST <onboarding@resend.dev>",
-                    "to": [user.email],
-                    "subject": "Verify your email",
-                    "text": (
-                        f"Hello {user.first_name or user.username},\n\n"
-                        "Welcome to ORENTEMIST! 🎉\n\n"
-                        "Thank you for creating an account with us.\n\n"
-                        "Your email verification code is:\n\n"
-                        f"{code}\n\n"
-                        "This code will expire in 10 minutes.\n\n"
-                        "Please enter this code on the verification page to complete your account registration.\n\n"
-                        "If you did not create this account, you can safely ignore this email.\n\n"
-                        "Thank you,\nORENTEMIST Customer Support"
-                    ),
-                }
+            send_orentemist_email(
+                to_email=user.email,
+                subject="Welcome to ORENTEMIST — Verify your email",
+                heading="Welcome to ORENTEMIST.",
+                message=(
+                    f"Hello {user.first_name or user.username}, "
+                    "thank you for creating your account. "
+                    "Use the security code below to verify "
+                    "your email and complete your registration."
+                ),
+                code=code,
+                footer_message=(
+                    "If you did not create this account, "
+                    "you can safely ignore this email."
+                ),
             )
 
         except Exception:
@@ -388,23 +633,20 @@ class ResendVerificationView(APIView):
 
         try:
 
-            resend.api_key = settings.RESEND_API_KEY
-
-            resend.Emails.send(
-                {
-                    "from": "ORENTEMIST <onboarding@resend.dev>",
-                    "to": [user.email],
-                    "subject":
-                        "Your new ORENTEMIST verification code",
-                    "text": (
-                        f"Hello {user.first_name or user.username},\n\n"
-                        "Here is your new ORENTEMIST email verification code:\n\n"
-                        f"{code}\n\n"
-                        "This code will expire in 10 minutes.\n\n"
-                        "If you did not request this code, you can safely ignore this email.\n\n"
-                        "Thank you,\nORENTEMIST Customer Support"
-                    ),
-                }
+            send_orentemist_email(
+                to_email=user.email,
+                subject="Your new ORENTEMIST verification code",
+                heading="Your new verification code.",
+                message=(
+                    f"Hello {user.first_name or user.username}, "
+                    "you requested a new verification code "
+                    "for your ORENTEMIST account."
+                ),
+                code=code,
+                footer_message=(
+                    "If you did not request a new verification "
+                    "code, you can safely ignore this email."
+                ),
             )
 
         except Exception:
@@ -482,20 +724,22 @@ class ForgotPasswordView(APIView):
 
         try:
 
-            send_mail(
-                subject="Reset your password",
+            send_orentemist_email(
+                to_email=user.email,
+                subject="ORENTEMIST — Reset your password",
+                heading="Reset your password.",
                 message=(
-                    f"Hello {user.first_name or user.username},\n\n"
-                    "We received a request to reset your password.\n\n"
-                    "Your password reset code is:\n\n"
-                    f"{code}\n\n"
-                    "This code will expire in 10 minutes.\n\n"
-                    "If you did not request a password reset, you can safely ignore this email.\n\n"
-                    "Thank you,\nORENTEMIST Customer Support"
+                    f"Hello {user.first_name or user.username}, "
+                    "we received a request to reset the password "
+                    "for your ORENTEMIST account. "
+                    "Use the security code below to continue."
                 ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
+                code=code,
+                footer_message=(
+                    "If you did not request a password reset, "
+                    "you can safely ignore this email. "
+                    "Your password will remain unchanged."
+                ),
             )
 
         except Exception:
@@ -817,10 +1061,6 @@ class AdminCustomerListView(generics.ListAPIView):
 # ADMIN CUSTOMER DETAIL
 # =========================================================
 
-# =========================================================
-# ADMIN CUSTOMER DETAIL
-# =========================================================
-
 class AdminCustomerDetailView(
     generics.RetrieveUpdateAPIView
 ):
@@ -921,7 +1161,7 @@ class AdminGuestCustomerListView(APIView):
                     "total_amount",
                     filter=Q(
                         payment_status="paid"
-                    )
+                    ),
                 ),
             )
             .order_by("-order_count")
@@ -987,35 +1227,48 @@ class AdminGuestCustomerListView(APIView):
             }
         )
 
+
+# =========================================================
+# LOGOUT
+# =========================================================
+
 class LogoutView(APIView):
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        profile, _ = CustomerProfile.objects.get_or_create(
-            user=request.user
+
+        profile, _ = (
+            CustomerProfile.objects.get_or_create(
+                user=request.user
+            )
         )
 
         # Immediately invalidate all existing access tokens.
         profile.session_version += 1
+
         profile.save(
             update_fields=["session_version"]
         )
 
         # Blacklist every outstanding refresh token
         # belonging to this user.
-        outstanding_tokens = OutstandingToken.objects.filter(
-            user=request.user
+        outstanding_tokens = (
+            OutstandingToken.objects.filter(
+                user=request.user
+            )
         )
 
         for token in outstanding_tokens:
+
             BlacklistedToken.objects.get_or_create(
                 token=token
             )
 
         return Response(
             {
-                "message": "Logged out successfully."
+                "message":
+                    "Logged out successfully."
             },
             status=status.HTTP_200_OK,
         )
-    
