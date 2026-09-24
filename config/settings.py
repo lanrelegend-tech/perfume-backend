@@ -253,8 +253,10 @@ STORAGES = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://perfume-frontend-new-ashy.vercel.app",
+    "https://www.orentemist.online",
+    "https://orentemist.online",
 ]
-
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -268,17 +270,18 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
     "x-guest-session-id",
 ]
+
 CORS_ALLOW_CREDENTIALS = True
 
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 
-if FRONTEND_URL:
+if FRONTEND_URL and FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
+    "https://www.orentemist.online",
+    "https://orentemist.online",
 ]
 
-if FRONTEND_URL:
+if FRONTEND_URL and FRONTEND_URL not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(FRONTEND_URL)
