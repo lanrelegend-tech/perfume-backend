@@ -1021,6 +1021,20 @@ class VerifyEmailLinkView(APIView):
     ),
     name="dispatch",
 )
+
+# =========================================================
+# RESEND VERIFICATION
+# =========================================================
+
+@method_decorator(
+    ratelimit(
+        key="ip",
+        rate="3/10m",
+        method="POST",
+        block=True
+    ),
+    name="dispatch",
+)
 class ResendVerificationView(APIView):
 
     permission_classes = [AllowAny]
@@ -1045,7 +1059,7 @@ class ResendVerificationView(APIView):
             {
                 "message":
                     "If an account exists with this email, "
-                    "a verification code has been sent."
+                    "a verification email has been sent."
             },
             status=status.HTTP_200_OK,
         )
@@ -1060,49 +1074,18 @@ class ResendVerificationView(APIView):
         if not user:
             return generic_response
 
-        try:
+        verification = (
+            EmailVerificationCode.objects
+            .filter(user=user)
+            .first()
+        )
 
-            verification = (
-                EmailVerificationCode.objects.get(
-                    user=user
-                )
-            )
-
-        except EmailVerificationCode.DoesNotExist:
-
-            verification = (
-                EmailVerificationCode.objects.create(
-                    user=user,
-                    code="!",
-                    expires_at=(
-                        timezone.now()
-                        + timedelta(minutes=10)
-                    ),
-                )
-            )
-
-        if verification.verified_at:
+        if verification and verification.verified_at:
             return generic_response
 
-        code = verification.generate_code()
-
         try:
 
-            send_orentemist_email(
-                to_email=user.email,
-                subject="Your new ORENTEMIST verification code",
-                heading="Your new verification code.",
-                message=(
-                    f"Hello {user.first_name or user.username}, "
-                    "you requested a new verification code "
-                    "for your ORENTEMIST account."
-                ),
-                code=code,
-                footer_message=(
-                    "If you did not request a new verification "
-                    "code, you can safely ignore this email."
-                ),
-            )
+            send_verification_link_email(user)
 
         except Exception:
 
@@ -1116,8 +1099,6 @@ class ResendVerificationView(APIView):
             )
 
         return generic_response
-
-
 
 # =========================================================
 # FORGOT PASSWORD
