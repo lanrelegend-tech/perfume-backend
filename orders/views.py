@@ -414,7 +414,7 @@ class AdminOrderDetailView(
 
                     except Exception as exc:
                         print(
-                            "REFUND EMAIL ERROR:",
+                            "ERROR:",
                             repr(exc),
                         )
 
