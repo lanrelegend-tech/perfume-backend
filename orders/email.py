@@ -49,7 +49,7 @@ def send_orentemist_email(
                         line-height: 1.6;
                         vertical-align: top;
                     ">
-                        {escape(str(value))}
+                        {escape(str(value)).replace(chr(10), "<br>")}
                     </td>
                 </tr>
             """
@@ -350,25 +350,90 @@ def send_orentemist_email(
 
                 </div>
 
-                <!-- FOOTER -->
+                <!-- CONTACT FOOTER -->
 
                 <div style="
-                    padding: 28px 35px;
-                    background: #faf9f7;
-                    border-top: 1px solid #eeeeee;
+                    padding: 34px 30px;
+                    background: #111111;
                     text-align: center;
                 ">
 
-                    <p style="
-                        margin: 0;
+                    <div style="
+                        color: #ffffff;
+                        font-size: 15px;
+                        font-weight: 600;
+                        letter-spacing: 2px;
+                    ">
+                        ORENTEMIST
+                    </div>
+
+                    <div style="
+                        margin-top: 8px;
                         color: #999999;
-                        font-size: 11px;
-                        line-height: 1.8;
+                        font-size: 9px;
+                        letter-spacing: 2.5px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
+
+                    <div style="
+                        margin: 24px auto 0;
+                        max-width: 400px;
+                        padding: 20px;
+                        border: 1px solid #333333;
+                        border-radius: 16px;
+                    ">
+
+                        <div style="
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                        ">
+                            Need help with your order?
+                        </div>
+
+                        <div style="
+                            margin-top: 7px;
+                            color: #999999;
+                            font-size: 11px;
+                            line-height: 1.7;
+                        ">
+                            Our Customer Support team is here
+                            to help with your order, delivery,
+                            pickup, or any questions.
+                        </div>
+
+                        <div style="
+                            margin-top: 16px;
+                        ">
+
+                            <a
+                                href="mailto:hello@orentemist.online"
+                                style="
+                                    color: #ffffff;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    text-decoration: none;
+                                "
+                            >
+                                hello@orentemist.online
+                            </a>
+
+                        </div>
+
+                    </div>
+
+                    <div style="
+                        margin-top: 24px;
+                        color: #666666;
+                        font-size: 10px;
+                        line-height: 1.7;
                     ">
                         © ORENTEMIST
                         <br>
                         Crafted for those who leave an impression.
-                    </p>
+                    </div>
 
                 </div>
 
@@ -448,14 +513,15 @@ def send_orentemist_email(
 
     plain_text += (
         f"{footer}\n\n"
-        "ORENTEMIST Customer Support"
+        "ORENTEMIST CUSTOMER SUPPORT\n"
+        "hello@orentemist.online"
     )
 
     resend.api_key = settings.RESEND_API_KEY
 
     response = resend.Emails.send(
         {
-            "from": "ORENTEMIST <onboarding@resend.dev>",
+            "from": "ORENTEMIST <hello@orentemist.online>",
             "to": [to_email],
             "subject": subject,
             "html": html,
@@ -464,6 +530,7 @@ def send_orentemist_email(
     )
 
     return response
+
 
 # =========================================================
 # ORDER CONFIRMATION
@@ -511,23 +578,17 @@ def send_order_confirmation_email(order):
             "delivery to the address provided below."
         )
 
-        shipping_address_parts = [
-            getattr(order, "address", ""),
-            getattr(order, "city", ""),
-            getattr(order, "state", ""),
-            getattr(order, "country", ""),
-        ]
-
-        shipping_address = ", ".join(
-            str(part).strip()
-            for part in shipping_address_parts
-            if part
+        shipping_address = (
+            f"{getattr(order, 'address', '')}\n"
+            f"{getattr(order, 'city', '')}, "
+            f"{getattr(order, 'state', '')}"
         )
 
         fulfillment_details = (
             "Shipping Address",
             shipping_address
-            or "Shipping address was not provided.",
+            if shipping_address.strip()
+            else "Shipping address was not provided.",
         )
 
     # =====================================================
@@ -596,6 +657,8 @@ def send_order_confirmation_email(order):
             fulfillment_details,
         ],
     )
+
+
 # =========================================================
 # ORDER SHIPPED
 # =========================================================
@@ -621,6 +684,12 @@ def send_order_shipped_email(order):
         order.full_name.split()[0]
         if order.full_name
         else "there"
+    )
+
+    shipping_address = (
+        f"{getattr(order, 'address', '')}\n"
+        f"{getattr(order, 'city', '')}, "
+        f"{getattr(order, 'state', '')}"
     )
 
     return send_orentemist_email(
@@ -659,9 +728,7 @@ def send_order_shipped_email(order):
             ),
             (
                 "Shipping Address",
-                f"{order.address}, "
-                f"{order.city}, "
-                f"{order.state}",
+                shipping_address,
             ),
         ],
     )
@@ -682,6 +749,12 @@ def send_order_delivered_email(order):
         order.full_name.split()[0]
         if order.full_name
         else "there"
+    )
+
+    delivery_address = (
+        f"{getattr(order, 'address', '')}\n"
+        f"{getattr(order, 'city', '')}, "
+        f"{getattr(order, 'state', '')}"
     )
 
     return send_orentemist_email(
@@ -718,9 +791,7 @@ def send_order_delivered_email(order):
             ),
             (
                 "Delivery Address",
-                f"{order.address}, "
-                f"{order.city}, "
-                f"{order.state}",
+                delivery_address,
             ),
         ],
     )
@@ -744,7 +815,7 @@ def send_order_refund_email(order, refund):
 
     refund_reason = (
         refund.reason
-        or "Order cancelled by admin"
+        or "Order cancelled"
     )
 
     first_name = (
