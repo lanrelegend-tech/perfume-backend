@@ -308,6 +308,10 @@ class AdminCustomerSerializer(serializers.ModelSerializer):
                 "tracking_number": order.tracking_number,
                 "created_at": order.created_at,
                 "updated_at": order.updated_at,
+                "phone": order.phone,
+                "address": order.address,
+                "city": order.city,
+                "state": order.state,
             }
             for order in orders
         ]
