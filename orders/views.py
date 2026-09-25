@@ -560,57 +560,49 @@ def _payment_metadata_matches_order(
 
     return True
 
-
 def _restore_order_inventory_and_coupon(order):
 
     """
     Restore stock and coupon usage exactly once
     when an already-paid order is refunded/cancelled.
+
+    IMPORTANT:
+    Pre-order items never consumed inventory,
+    so they must NEVER restore inventory.
     """
 
     # -------------------------------------------------
     # RESTORE INVENTORY
     # -------------------------------------------------
 
-    requirements = {}
-
     for item in order.items.all():
 
-        if item.variant_id:
+        # -------------------------------------------------
+        # PRE-ORDER
+        #
+        # Pre-orders did not consume stock.
+        # Therefore, do NOT restore anything.
+        # -------------------------------------------------
 
-            key = (
-                "variant",
-                item.variant_id,
-            )
-
-        elif item.product_id:
-
-            key = (
-                "product",
-                item.product_id,
-            )
-
-        else:
+        if item.is_preorder:
             continue
 
-        requirements[key] = (
-            requirements.get(key, 0)
-            + item.quantity
-        )
+        # -------------------------------------------------
+        # VARIANT
+        # -------------------------------------------------
 
-    for key, quantity in requirements.items():
-
-        item_type, item_id = key
-
-        if item_type == "variant":
+        if item.variant_id:
 
             variant = (
                 ProductVariant.objects
                 .select_for_update()
-                .get(pk=item_id)
+                .get(pk=item.variant_id)
             )
 
-            variant.stock_quantity += quantity
+            variant.stock_quantity = (
+                int(variant.stock_quantity or 0)
+                + item.quantity
+            )
 
             variant.in_stock = (
                 variant.stock_quantity > 0
@@ -623,15 +615,22 @@ def _restore_order_inventory_and_coupon(order):
                 ]
             )
 
-        else:
+        # -------------------------------------------------
+        # PRODUCT
+        # -------------------------------------------------
+
+        elif item.product_id:
 
             product = (
                 Product.objects
                 .select_for_update()
-                .get(pk=item_id)
+                .get(pk=item.product_id)
             )
 
-            product.stock_quantity += quantity
+            product.stock_quantity = (
+                int(product.stock_quantity or 0)
+                + item.quantity
+            )
 
             product.in_stock = (
                 product.stock_quantity > 0
@@ -669,9 +668,11 @@ def _restore_order_inventory_and_coupon(order):
             )
 
         if order.user:
+
             coupon.used_by.remove(
                 order.user
             )
+
 
 
 def _finalize_successful_payment(
@@ -804,7 +805,7 @@ def _finalize_successful_payment(
     locked_variants = {}
     locked_products = {}
 
-    # -------------------------------------------------
+       # -------------------------------------------------
     # LOCK + CHECK VARIANTS
     # -------------------------------------------------
 
@@ -816,15 +817,67 @@ def _finalize_successful_payment(
             .get(pk=variant_id)
         )
 
-        if (
-            not variant.in_stock
-            or variant.stock_quantity < quantity
+        variant_stock = int(
+            variant.stock_quantity or 0
+        )
+
+        variant_has_stock = (
+            variant_stock > 0
+            and variant.in_stock
+        )
+
+        # Find the product connected to this variant.
+        product = variant.product
+
+        product_stock = int(
+            product.stock_quantity or 0
+        )
+
+        product_allows_preorder = (
+            product.is_preorder is True
+        )
+
+        # -------------------------------------------------
+        # NORMAL PURCHASE
+        # -------------------------------------------------
+
+        if variant_has_stock:
+
+            if quantity > variant_stock:
+
+                from rest_framework.exceptions import ValidationError
+
+                raise ValidationError(
+                    f"Not enough stock for "
+                    f"{product.name} "
+                    f"({variant.size})."
+                )
+
+        # -------------------------------------------------
+        # PRE-ORDER
+        # -------------------------------------------------
+
+        elif (
+            variant_stock == 0
+            and product_stock == 0
+            and product_allows_preorder
         ):
+
+            # Pre-orders do not consume inventory.
+            pass
+
+        # -------------------------------------------------
+        # SOLD OUT
+        # -------------------------------------------------
+
+        else:
 
             from rest_framework.exceptions import ValidationError
 
             raise ValidationError(
-                f"Not enough stock for variant {variant_id}."
+                f"{product.name} "
+                f"({variant.size}) "
+                "is sold out."
             )
 
         locked_variants[variant_id] = variant
@@ -841,26 +894,89 @@ def _finalize_successful_payment(
             .get(pk=product_id)
         )
 
-        if (
-            not product.in_stock
-            or product.stock_quantity < quantity
+        product_stock = int(
+            product.stock_quantity or 0
+        )
+
+        product_has_stock = (
+            product_stock > 0
+            and product.in_stock
+        )
+
+        product_allows_preorder = (
+            product.is_preorder is True
+        )
+
+        # -------------------------------------------------
+        # NORMAL PURCHASE
+        # -------------------------------------------------
+
+        if product_has_stock:
+
+            if quantity > product_stock:
+
+                from rest_framework.exceptions import ValidationError
+
+                raise ValidationError(
+                    f"Not enough stock for "
+                    f"{product.name}."
+                )
+
+        # -------------------------------------------------
+        # PRE-ORDER
+        # -------------------------------------------------
+
+        elif (
+            product_stock == 0
+            and product_allows_preorder
         ):
+
+            # Pre-orders do not consume inventory.
+            pass
+
+        # -------------------------------------------------
+        # SOLD OUT
+        # -------------------------------------------------
+
+        else:
 
             from rest_framework.exceptions import ValidationError
 
             raise ValidationError(
-                f"Not enough stock for product {product_id}."
+                f"{product.name} is sold out."
             )
 
         locked_products[product_id] = product
 
     # -------------------------------------------------
     # REDUCE VARIANT STOCK
+    #
+    # IMPORTANT:
+    # Pre-orders must NOT reduce stock.
     # -------------------------------------------------
 
     for variant_id, quantity in variant_requirements.items():
 
         variant = locked_variants[variant_id]
+
+        variant_stock = int(
+            variant.stock_quantity or 0
+        )
+
+        product = variant.product
+
+        product_stock = int(
+            product.stock_quantity or 0
+        )
+
+        is_preorder = (
+            variant_stock == 0
+            and product_stock == 0
+            and product.is_preorder is True
+        )
+
+        if is_preorder:
+            continue
 
         variant.stock_quantity -= quantity
 
@@ -877,11 +993,26 @@ def _finalize_successful_payment(
 
     # -------------------------------------------------
     # REDUCE PRODUCT STOCK
+    #
+    # IMPORTANT:
+    # Pre-orders must NOT reduce stock.
     # -------------------------------------------------
 
     for product_id, quantity in product_requirements.items():
 
         product = locked_products[product_id]
+
+        product_stock = int(
+            product.stock_quantity or 0
+        )
+
+        is_preorder = (
+            product_stock == 0
+            and product.is_preorder is True
+        )
+
+        if is_preorder:
+            continue
 
         product.stock_quantity -= quantity
 
@@ -895,7 +1026,6 @@ def _finalize_successful_payment(
                 "in_stock",
             ]
         )
-
     # -------------------------------------------------
     # COUPON
     # -------------------------------------------------
@@ -2490,36 +2620,63 @@ class CreateOrderView(APIView):
                         )
 
                 # ---------------------------------
-                # VARIANT STOCK
+                # STOCK + PRE-ORDER
                 # ---------------------------------
 
                 if variant:
 
-                    if not variant.in_stock:
-                        return Response(
-                            {
-                                "error": (
-                                    f"{product.name} "
-                                    f"({variant.size}) "
-                                    "is out of stock."
-                                )
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
+                    variant_stock = int(
+                        variant.stock_quantity or 0
+                    )
 
-                    if (
-                        quantity
-                        > variant.stock_quantity
-                    ):
+                    product_stock = int(
+                        product.stock_quantity or 0
+                    )
+
+                    variant_has_stock = (
+                        variant_stock > 0
+                        and variant.in_stock
+                    )
+
+                    is_preorder = (
+                        variant_stock == 0
+                        and product_stock == 0
+                        and product.is_preorder is True
+                    )
+
+                    # NORMAL PURCHASE
+                    if variant_has_stock:
+
+                        if quantity > variant_stock:
+                            return Response(
+                                {
+                                    "error": (
+                                        f"Only "
+                                        f"{variant_stock} "
+                                        f"units of "
+                                        f"{product.name} "
+                                        f"({variant.size}) "
+                                        "are available."
+                                    )
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                    # PRE-ORDER
+                    elif is_preorder:
+
+                        # No stock limit for a preorder.
+                        pass
+
+                    # SOLD OUT
+                    else:
+
                         return Response(
                             {
                                 "error": (
-                                    f"Only "
-                                    f"{variant.stock_quantity} "
-                                    f"units of "
                                     f"{product.name} "
                                     f"({variant.size}) "
-                                    "are available."
+                                    "is sold out."
                                 )
                             },
                             status=status.HTTP_400_BAD_REQUEST,
@@ -2535,29 +2692,51 @@ class CreateOrderView(APIView):
 
                 else:
 
-                    if not product.in_stock:
-                        return Response(
-                            {
-                                "error": (
-                                    f"{product.name} "
-                                    "is out of stock."
-                                )
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
+                    product_stock = int(
+                        product.stock_quantity or 0
+                    )
 
-                    if (
-                        quantity
-                        > product.stock_quantity
-                    ):
+                    product_has_stock = (
+                        product_stock > 0
+                        and product.in_stock
+                    )
+
+                    is_preorder = (
+                        product_stock == 0
+                        and product.is_preorder is True
+                    )
+
+                    # NORMAL PURCHASE
+                    if product_has_stock:
+
+                        if quantity > product_stock:
+                            return Response(
+                                {
+                                    "error": (
+                                        f"Only "
+                                        f"{product_stock} "
+                                        f"units of "
+                                        f"{product.name} "
+                                        "are available."
+                                    )
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                    # PRE-ORDER
+                    elif is_preorder:
+
+                        # No stock limit for a preorder.
+                        pass
+
+                    # SOLD OUT
+                    else:
+
                         return Response(
                             {
                                 "error": (
-                                    f"Only "
-                                    f"{product.stock_quantity} "
-                                    f"units of "
                                     f"{product.name} "
-                                    "are available."
+                                    "is sold out."
                                 )
                             },
                             status=status.HTTP_400_BAD_REQUEST,
@@ -2584,6 +2763,10 @@ class CreateOrderView(APIView):
 
                 products_total += item_subtotal
 
+                # ---------------------------------
+                # SAVE VALIDATED ITEM
+                # ---------------------------------
+
                 order_items.append(
                     {
                         "product": product,
@@ -2592,6 +2775,7 @@ class CreateOrderView(APIView):
                         "unit_price": item_price,
                         "subtotal": item_subtotal,
                         "size": item_size,
+                        "is_preorder": is_preorder,
                     }
                 )
 
@@ -2837,6 +3021,9 @@ class CreateOrderView(APIView):
                     variant_size=item[
                         "size"
                     ],
+                    is_preorder=item[
+                        "is_preorder"
+                    ],
                 )
 
             # ---------------------------------
@@ -2844,21 +3031,21 @@ class CreateOrderView(APIView):
             # ---------------------------------
 
             return Response(
-    {
-        "message": (
-            "Order created successfully."
-        ),
-        "order": {
-            **OrderSerializer(
-                order
-            ).data,
-            "checkout_token": str(
-                order.checkout_token
-            ),
-        },
-    },
-    status=status.HTTP_201_CREATED,
-)
+                {
+                    "message": (
+                        "Order created successfully."
+                    ),
+                    "order": {
+                        **OrderSerializer(
+                            order
+                        ).data,
+                        "checkout_token": str(
+                            order.checkout_token
+                        ),
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         except Exception as e:
 
@@ -2875,6 +3062,7 @@ class CreateOrderView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
         
 class MyOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer

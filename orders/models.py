@@ -205,6 +205,20 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField(
         default=1
     )
+    is_preorder = models.BooleanField(
+    default=False
+)
+
+    preorder_release_date = models.DateField(
+    null=True,
+    blank=True
+)
+
+    preorder_message = models.CharField(
+    max_length=255,
+    blank=True,
+    default=""
+)
 
     subtotal = models.DecimalField(
         max_digits=12,
