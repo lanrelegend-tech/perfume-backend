@@ -37,108 +37,40 @@ class OrderItemSerializer(serializers.ModelSerializer):
             return None
         
 
-class OrderSerializer(serializers.ModelSerializer):
-    items = OrderItemSerializer(
-        many=True,
-        read_only=True
-    )
-
-    status_history = serializers.SerializerMethodField()
-    coupon_discount_type = serializers.CharField(
-        source="coupon.discount_type",
-        read_only=True,
-        allow_null=True,
-    )
-
-    coupon_discount_value = serializers.DecimalField(
-        source="coupon.discount_value",
-        max_digits=10,
-        decimal_places=2,
-        read_only=True,
-        allow_null=True,
-    )
-    coupon_code = serializers.CharField(
-
-        source="coupon.code",
-
-        read_only=True,
-
-        allow_null=True,
-
-    )
-    
-
-    def get_status_history(self, obj):
-        return [
-            {
-                "id": history.id,
-                "status": history.status,
-                "changed_by": (
-                    history.changed_by.username
-                    if history.changed_by
-                    else None
-                ),
-                "note": history.note,
-                "created_at": history.created_at,
-            }
-            for history in obj.status_history.all()
-        ]
+class OrderItemSerializer(serializers.ModelSerializer):
+    product_image = serializers.SerializerMethodField()
 
     class Meta:
-        model = Order
-
+        model = OrderItem
         fields = [
             "id",
-            "order_number",
-            "items",
-            "checkout_token",
-            "total_amount",
-            "delivery_fee",
-            "status",
-            "payment_status",
-            "payment_reference",
-            "full_name",
-            "phone",
-            "email",
-            "address",
-            "city",
-            "state",
-            "notes",
-            "courier",
-            "tracking_number",
-            "shipped_at",
-            "delivered_at",
-            "created_at",
-            "updated_at",
-            "coupon",
-            "coupon_code",
-             "status_history",
-             "coupon_discount_type",
-             "coupon_discount_value",
+            "product",
+            "variant",
+            "product_name",
+            "product_brand",
+            "variant_size",
+            "product_price",
+            "product_image",
+            "quantity",
+            "subtotal",
+            "is_preorder",
+            "preorder_release_date",
+            "preorder_message",
         ]
 
-        read_only_fields = [
-            "id",
-            "order_number",
-            "items",
-            "checkout_token",
-            "total_amount",
-            "delivery_fee",
-            "coupon",
-            "coupon_code",
-            "status",
-            "payment_status",
-            "payment_reference",
-            "courier",
-            "tracking_number",
-            "shipped_at",
-            "delivered_at",
-            "created_at",
-            "updated_at",
-            "coupon_discount_type",
-            "coupon_discount_value",
-        ]
+    def get_product_image(self, obj):
+        if not obj.product:
+            return None
 
+        image = obj.product.image
+
+        if not image:
+            return None
+
+        try:
+            return image.url
+        except Exception:
+            return None
 
 class AdminOrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(
