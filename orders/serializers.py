@@ -1,41 +1,11 @@
 from rest_framework import serializers
-from .models import Refund
 
-from .models import Order, OrderItem
+from .models import (
+    Order,
+    OrderItem,
+    Refund,
+)
 
-
-class OrderItemSerializer(serializers.ModelSerializer):
-    product_image = serializers.SerializerMethodField()
-
-    class Meta:
-        model = OrderItem
-        fields = [
-            "id",
-            "product",
-            "variant",
-            "product_name",
-            "product_brand",
-            "variant_size",
-            "product_price",
-            "product_image",
-            "quantity",
-            "subtotal",
-        ]
-
-    def get_product_image(self, obj):
-        if not obj.product:
-            return None
-
-        image = obj.product.image
-
-        if not image:
-            return None
-
-        try:
-            return image.url
-        except Exception:
-            return None
-        
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product_image = serializers.SerializerMethodField()
@@ -72,12 +42,85 @@ class OrderItemSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+
+class OrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(
+        many=True,
+        read_only=True
+    )
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_number",
+            "user",
+            "items",
+            "total_amount",
+            "delivery_fee",
+            "coupon",
+            "status",
+            "payment_status",
+            "payment_reference",
+            "full_name",
+            "phone",
+            "email",
+            "address",
+            "city",
+            "state",
+            "notes",
+            "courier",
+            "tracking_number",
+            "shipped_at",
+            "delivered_at",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "order_number",
+            "user",
+            "items",
+            "total_amount",
+            "delivery_fee",
+            "coupon",
+            "payment_reference",
+            "payment_status",
+            "shipped_at",
+            "delivered_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class AdminOrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(
         many=True,
         read_only=True
     )
+
     status_history = serializers.SerializerMethodField()
+
+    coupon_discount_type = serializers.CharField(
+        source="coupon.discount_type",
+        read_only=True,
+        allow_null=True,
+    )
+
+    coupon_discount_value = serializers.DecimalField(
+        source="coupon.discount_value",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+        allow_null=True,
+    )
+
+    coupon_code = serializers.CharField(
+        source="coupon.code",
+        read_only=True,
+        allow_null=True,
+    )
 
     def get_status_history(self, obj):
         return [
@@ -94,24 +137,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             }
             for history in obj.status_history.all()
         ]
-    coupon_discount_type = serializers.CharField(
-    source="coupon.discount_type",
-    read_only=True,
-    allow_null=True,
-)
 
-    coupon_discount_value = serializers.DecimalField(
-    source="coupon.discount_value",
-    max_digits=10,
-    decimal_places=2,
-    read_only=True,
-    allow_null=True,
-)
-    coupon_code = serializers.CharField(
-        source="coupon.code",
-        read_only=True,
-        allow_null=True,
-    )    
     class Meta:
         model = Order
 
@@ -140,9 +166,9 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "created_at",
             "updated_at",
-             "status_history",
-               "coupon_discount_type",
-              "coupon_discount_value",
+            "status_history",
+            "coupon_discount_type",
+            "coupon_discount_value",
         ]
 
         read_only_fields = [
@@ -165,6 +191,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "coupon_discount_value",
         ]
 
+
 class RefundSerializer(serializers.ModelSerializer):
     order_number = serializers.CharField(
         source="order.order_number",
@@ -178,6 +205,7 @@ class RefundSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Refund
+
         fields = [
             "id",
             "order",
@@ -195,13 +223,11 @@ class RefundSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "order",
-
-    "amount",
+            "amount",
             "processed_by",
             "admin_name",
             "paystack_reference",
             "status",
             "created_at",
             "updated_at",
-        ]        
-     
+        ]
