@@ -26,6 +26,7 @@ class ProductListView(generics.ListAPIView):
         "brand",
         "in_stock",
         "featured",
+         "is_preorder",
     ]
 
     search_fields = [
@@ -61,6 +62,7 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
         brand = self.request.query_params.get("brand")
         in_stock = self.request.query_params.get("in_stock")
         featured = self.request.query_params.get("featured")
+        is_preorder = self.request.query_params.get("is_preorder")
         search = self.request.query_params.get("search")
 
         if category:
@@ -82,6 +84,11 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(
                 featured=featured.lower() == "true"
             )
+
+        if is_preorder is not None:
+             queryset = queryset.filter(
+                 is_preorder=is_preorder.lower() == "true"
+            )    
 
         if search:
             from django.db.models import Q

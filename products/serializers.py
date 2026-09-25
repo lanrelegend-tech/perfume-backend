@@ -92,8 +92,11 @@ class ProductSerializer(serializers.ModelSerializer):
             "fragrance_notes",
             "image",
             "stock_quantity",
-            "in_stock",
-            "featured",
+"in_stock",
+"is_preorder",
+"preorder_release_date",
+"preorder_message",
+"featured",
             "average_rating",
             "review_count",
             "created_at",
@@ -156,6 +159,11 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "featured",
             "created_at",
             "updated_at",
+            "is_preorder",
+
+"preorder_release_date",
+
+"preorder_message",
         ]
 
         read_only_fields = [
