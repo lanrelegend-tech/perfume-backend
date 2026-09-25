@@ -1575,6 +1575,84 @@ class AdminCustomerDetailView(
             .select_related("profile")
             .prefetch_related("orders")
         )
+    def post(self, request, *args, **kwargs):
+
+        user = self.get_object()
+
+        message = (
+            request.data.get("message", "")
+            .strip()
+        )
+
+        if not message:
+            return Response(
+                {
+                    "error": "Message is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.email:
+            return Response(
+                {
+                    "error":
+                        "This customer does not have an email address."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        customer_name = (
+            f"{user.first_name} {user.last_name}"
+            .strip()
+        )
+
+        if not customer_name:
+            customer_name = (
+                user.username
+                or user.email
+                or "Customer"
+            )
+
+        try:
+
+            send_orentemist_email(
+                to_email=user.email,
+                subject="Message from ORENTEMIST",
+                heading="A message from ORENTEMIST.",
+                message=(
+                    f"Hello {customer_name},\n\n"
+                    f"{message}"
+                ),
+                footer_message=(
+                    "If you have any questions, "
+                    "please reply to this email or "
+                    "contact ORENTEMIST Customer Support."
+                ),
+            )
+
+        except Exception as error:
+
+            print(
+                "CUSTOMER MESSAGE EMAIL ERROR:",
+                error
+            )
+
+            return Response(
+                {
+                    "error":
+                        "Unable to send the message. "
+                        "Please try again later."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                "message":
+                    "Customer message sent successfully."
+            },
+            status=status.HTTP_200_OK,
+        )    
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):

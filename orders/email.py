@@ -3,6 +3,224 @@ from django.utils.html import escape
 import resend
 
 
+
+
+# =========================================================
+# CUSTOMER MESSAGE
+# =========================================================
+
+def send_customer_message_email(
+    to_email,
+    customer_name,
+    message,
+):
+    subject = "Message from ORENTEMIST"
+
+    safe_name = escape(
+        str(customer_name or "Customer")
+    )
+
+    safe_message = escape(
+        str(message)
+    ).replace("\n", "<br>")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+        <title>{escape(subject)}</title>
+    </head>
+
+    <body style="
+        margin: 0;
+        padding: 0;
+        background: #f4f3f0;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #111111;
+    ">
+
+        <div style="
+            width: 100%;
+            padding: 40px 15px;
+            box-sizing: border-box;
+        ">
+
+            <div style="
+                max-width: 600px;
+                margin: 0 auto;
+                background: #ffffff;
+                border: 1px solid #e8e6e1;
+                border-radius: 24px;
+                overflow: hidden;
+            ">
+
+                <div style="
+                    padding: 36px 30px;
+                    border-bottom: 1px solid #eeeeee;
+                    text-align: center;
+                ">
+
+                    <div style="
+                        font-size: 22px;
+                        font-weight: 700;
+                        letter-spacing: 5px;
+                    ">
+                        ORENTEMIST
+                    </div>
+
+                    <div style="
+                        margin-top: 9px;
+                        color: #999999;
+                        font-size: 9px;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
+
+                </div>
+
+                <div style="
+                    padding: 42px 35px;
+                ">
+
+                    <p style="
+                        margin: 0 0 12px;
+                        color: #999999;
+                        font-size: 10px;
+                        font-weight: 600;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        CUSTOMER SUPPORT
+                    </p>
+
+                    <h1 style="
+                        margin: 0 0 18px;
+                        font-size: 29px;
+                        line-height: 1.3;
+                        font-weight: 600;
+                    ">
+                        A message from ORENTEMIST
+                    </h1>
+
+                    <p style="
+                        margin: 0 0 24px;
+                        color: #666666;
+                        font-size: 15px;
+                        line-height: 1.8;
+                    ">
+                        Hello {safe_name},
+                    </p>
+
+                    <div style="
+                        padding: 20px 22px;
+                        background: #f8f7f4;
+                        border: 1px solid #e5e2dc;
+                        border-radius: 16px;
+                        color: #333333;
+                        font-size: 15px;
+                        line-height: 1.8;
+                    ">
+                        {safe_message}
+                    </div>
+
+                    <p style="
+                        margin: 28px 0 0;
+                        padding-top: 25px;
+                        border-top: 1px solid #eeeeee;
+                        color: #888888;
+                        font-size: 12px;
+                        line-height: 1.8;
+                    ">
+                        If you have any questions, please reply
+                        to this email or contact ORENTEMIST
+                        Customer Support.
+                    </p>
+
+                </div>
+
+                <div style="
+                    padding: 34px 30px;
+                    background: #111111;
+                    text-align: center;
+                ">
+
+                    <div style="
+                        color: #ffffff;
+                        font-size: 15px;
+                        font-weight: 600;
+                        letter-spacing: 2px;
+                    ">
+                        ORENTEMIST
+                    </div>
+
+                    <div style="
+                        margin-top: 8px;
+                        color: #999999;
+                        font-size: 9px;
+                        letter-spacing: 2.5px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
+
+                    <div style="
+                        margin-top: 20px;
+                    ">
+
+                        <a
+                            href="mailto:hello@orentemist.online"
+                            style="
+                                color: #ffffff;
+                                font-size: 12px;
+                                font-weight: 600;
+                                text-decoration: none;
+                            "
+                        >
+                            hello@orentemist.online
+                        </a>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </body>
+    </html>
+    """
+
+    plain_text = (
+        "ORENTEMIST\n"
+        "The Art of Fragrance\n\n"
+        "A message from ORENTEMIST\n\n"
+        f"Hello {customer_name or 'Customer'},\n\n"
+        f"{message}\n\n"
+        "Regards,\n"
+        "ORENTEMIST Customer Support\n\n"
+        "hello@orentemist.online"
+    )
+
+    resend.api_key = settings.RESEND_API_KEY
+
+    return resend.Emails.send(
+        {
+            "from": "ORENTEMIST <hello@orentemist.online>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": plain_text,
+        }
+    )
+
 # =========================================================
 # ORENTEMIST EMAIL HELPER
 # =========================================================
