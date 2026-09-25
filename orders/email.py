@@ -167,7 +167,6 @@ def send_orentemist_email(
             preorder_html = ""
 
             if is_preorder:
-
                 preorder_message = (
                     getattr(
                         item,
@@ -379,8 +378,6 @@ def send_orentemist_email(
                 overflow: hidden;
             ">
 
-                <!-- HEADER -->
-
                 <div style="
                     padding: 36px 30px;
                     border-bottom: 1px solid #eeeeee;
@@ -407,8 +404,6 @@ def send_orentemist_email(
                     </div>
 
                 </div>
-
-                <!-- MAIN CONTENT -->
 
                 <div style="
                     padding: 42px 35px;
@@ -466,8 +461,6 @@ def send_orentemist_email(
                     </div>
 
                 </div>
-
-                <!-- CONTACT FOOTER -->
 
                 <div style="
                     padding: 34px 30px;
@@ -668,7 +661,6 @@ def send_orentemist_email(
                 )
 
             if is_preorder:
-
                 preorder_message = (
                     getattr(
                         item,
@@ -860,10 +852,83 @@ def send_order_confirmation_email(order):
 
 
 # =========================================================
-# ORDER SHIPPED
+# ORDER SHIPPED / PICKUP READY
 # =========================================================
 
 def send_order_shipped_email(order):
+
+    is_pickup = (
+        getattr(
+            order,
+            "delivery_method",
+            "delivery",
+        ) == "pickup"
+    )
+
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
+
+    # -----------------------------------------------------
+    # PICKUP
+    # -----------------------------------------------------
+
+    if is_pickup:
+
+        subject = (
+            f"Your ORENTEMIST Order Is Ready for Pickup — "
+            f"{order.order_number}"
+        )
+
+        pickup_location = (
+            getattr(
+                order,
+                "pickup_address",
+                None,
+            )
+            or "Pickup location will be provided by ORENTEMIST."
+        )
+
+        return send_orentemist_email(
+            to_email=order.email,
+
+            subject=subject,
+
+            heading="Your fragrance is ready for pickup.",
+
+            message=(
+                f"Hello {escape(str(first_name))}, "
+                "good news — your ORENTEMIST order is now "
+                "ready for pickup. "
+                "Please collect your order from the pickup "
+                "location shown below."
+            ),
+
+            footer_message=(
+                "Please bring any order information requested "
+                "by our team when collecting your fragrance. "
+                "Thank you for choosing ORENTEMIST."
+            ),
+
+            items=order.items.all(),
+
+            details=[
+                (
+                    "Order Number",
+                    order.order_number,
+                ),
+                (
+                    "Pickup Location",
+                    pickup_location,
+                ),
+            ],
+        )
+
+    # -----------------------------------------------------
+    # DELIVERY
+    # -----------------------------------------------------
 
     subject = (
         f"Your ORENTEMIST Order Has Shipped — "
@@ -878,12 +943,6 @@ def send_order_shipped_email(order):
     courier = (
         order.courier
         or "Not provided"
-    )
-
-    first_name = (
-        order.full_name.split()[0]
-        if order.full_name
-        else "there"
     )
 
     shipping_address = (
@@ -941,15 +1000,87 @@ def send_order_shipped_email(order):
 
 def send_order_delivered_email(order):
 
-    subject = (
-        f"Your ORENTEMIST Order Has Been Delivered — "
-        f"{order.order_number}"
+    is_pickup = (
+        getattr(
+            order,
+            "delivery_method",
+            "delivery",
+        ) == "pickup"
     )
 
     first_name = (
         order.full_name.split()[0]
         if order.full_name
         else "there"
+    )
+
+    # -----------------------------------------------------
+    # PICKUP
+    # -----------------------------------------------------
+
+    if is_pickup:
+
+        subject = (
+            f"Your ORENTEMIST Pickup Is Complete — "
+            f"{order.order_number}"
+        )
+
+        pickup_location = (
+            getattr(
+                order,
+                "pickup_address",
+                None,
+            )
+            or "Pickup location was not provided."
+        )
+
+        return send_orentemist_email(
+            to_email=order.email,
+
+            subject=subject,
+
+            heading="Your pickup is complete.",
+
+            message=(
+                f"Hello {escape(str(first_name))}, "
+                "your ORENTEMIST order has been successfully "
+                "completed through pickup. "
+                "We hope you enjoy your fragrance and that "
+                "it becomes a beautiful part of your "
+                "everyday moments."
+            ),
+
+            footer_message=(
+                "Thank you for choosing ORENTEMIST. "
+                "We are grateful to have you as part of "
+                "our fragrance journey."
+            ),
+
+            items=order.items.all(),
+
+            details=[
+                (
+                    "Order Number",
+                    order.order_number,
+                ),
+                (
+                    "Total Amount",
+                    f"₦{order.total_amount:,.2f}",
+                ),
+                (
+                    "Pickup Location",
+                    pickup_location,
+                ),
+            ],
+        )
+
+    # -----------------------------------------------------
+    # DELIVERY
+    # -----------------------------------------------------
+
+    subject = (
+        f"Your ORENTEMIST Order Has Been Delivered — "
+        f"{order.order_number}"
     )
 
     delivery_address = (
@@ -1026,6 +1157,41 @@ def send_order_refund_email(order, refund):
         else "there"
     )
 
+    is_pickup = (
+        getattr(
+            order,
+            "delivery_method",
+            "delivery",
+        ) == "pickup"
+    )
+
+    if is_pickup:
+
+        fulfillment_details = (
+            "Pickup Location",
+            getattr(
+                order,
+                "pickup_address",
+                None,
+            )
+            or "Pickup location was not provided.",
+        )
+
+    else:
+
+        shipping_address = (
+            f"{getattr(order, 'address', '')}\n"
+            f"{getattr(order, 'city', '')}, "
+            f"{getattr(order, 'state', '')}"
+        )
+
+        fulfillment_details = (
+            "Shipping Address",
+            shipping_address
+            if shipping_address.strip()
+            else "Shipping address was not provided.",
+        )
+
     return send_orentemist_email(
         to_email=order.email,
 
@@ -1069,5 +1235,6 @@ def send_order_refund_email(order, refund):
                 "Reason",
                 refund_reason,
             ),
+            fulfillment_details,
         ],
     )
