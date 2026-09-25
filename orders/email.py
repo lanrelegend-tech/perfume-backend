@@ -1,2133 +1,1036 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import AdminSidebar from "@/components/AdminSidebar";
-import { useParams, useRouter } from "next/navigation";
-import {
-  Search,
-  Bell,
-  MessageCircle,
-  ArrowLeft,
-  Truck,
-  MapPin,
-  UserRound,
-  CreditCard,
-  CheckCircle2,
-  Clock3,
-  PackageCheck,
-  Loader2,
-  Save,
-  AlertTriangle,
-} from "lucide-react";
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://perfume-backend-sbvd.onrender.com/api";
-
-export default function OrderDetailsPage() {
-  const router = useRouter();
-  const params = useParams();
-  const orderId = params?.id;
-
-  const [order, setOrder] = useState(null);
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
-
-  const [courier, setCourier] = useState("");
-  const [trackingNumber, setTrackingNumber] =
-    useState("");
-
-  const [savingShipping, setSavingShipping] =
-    useState(false);
-
-  const [error, setError] = useState("");
-
-  const [confirmModal, setConfirmModal] =
-    useState({
-      open: false,
-      status: null,
-      title: "",
-      message: "",
-    });
-
-  useEffect(() => {
-    if (!orderId) return;
-
-    const fetchOrder = async () => {
-      try {
-        setLoading(true);
-        setError("");
-
-        const token =
-          localStorage.getItem("access_token");
-
-        if (!token) {
-          router.push("/admin/login");
-          return;
-        }
-
-        const response = await fetch(
-          `${API_URL}/orders/admin/${orderId}/`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            cache: "no-store",
-          }
-        );
-
-        if (response.status === 401) {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-
-          router.push("/admin/login");
-          return;
-        }
-
-        if (response.status === 403) {
-          throw new Error(
-            "You do not have permission to view this order."
-          );
-        }
-
-        if (response.status === 404) {
-          throw new Error("Order not found.");
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            "Failed to load order details."
-          );
-        }
-
-        const data = await response.json();
-
-        console.log(
-          "ADMIN ORDER DETAILS:",
-          data
-        );
-
-        setOrder(data);
-
-        setStatus(
-          formatStatus(data.status)
-        );
-
-        setCourier(data.courier || "");
-
-        setTrackingNumber(
-          data.tracking_number || ""
-        );
-      } catch (err) {
-        console.error(
-          "ORDER DETAILS ERROR:",
-          err
-        );
-
-        setError(
-          err.message ||
-            "Failed to load order."
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOrder();
-  }, [orderId, router]);
-
-  /*
-    OPEN CONFIRMATION MODAL
-  */
-
-  const updateStatus = async (newStatus) => {
-    if (!order) return;
-
-    if (newStatus === order.status) {
-      setStatus(formatStatus(newStatus));
-      return;
-    }
-
-    if (
-      order.status === "processing" &&
-      newStatus === "shipped"
-    ) {
-      if (
-        !courier.trim() ||
-        !trackingNumber.trim()
-      ) {
-        setError(
-          "To mark this order as Shipped, you must enter both the courier and tracking number first."
-        );
-
-        return;
-      }
-    }
-
-    const statusNames = {
-      pending: "Pending",
-      confirmed: "Confirmed",
-      processing: "Processing",
-      shipped: "Shipped",
-      delivered: "Delivered",
-      cancelled: "Cancelled",
-    };
-
-    const oldStatusName =
-      statusNames[order.status] ||
-      order.status;
-
-    const newStatusName =
-      statusNames[newStatus] ||
-      newStatus;
-
-    let message = `Are you sure you want to change this order from ${oldStatusName} to ${newStatusName}?`;
-
-    if (
-      order.status === "processing" &&
-      newStatus === "delivered"
-    ) {
-      message =
-        "This order is currently Processing.\n\nAre you sure you want to skip the Shipped stage and mark this order as Delivered?";
-    }
-
-    if (newStatus === "cancelled") {
-      if (order.payment_status === "paid") {
-        message =
-          "Are you sure you want to cancel this order?\n\nThis order has been paid. Cancelling it will request a full refund, restore the purchased stock, and reverse the coupon usage if one was used.\n\nPre-order items will not restore inventory because they did not consume current stock.\n\nThis action cannot be undone.";
-      } else {
-        message =
-          "Are you sure you want to cancel this order?\n\nThis order has not been paid, so no refund will be made.\n\nThis action cannot be undone.";
-      }
-    }
-
-    setConfirmModal({
-      open: true,
-      status: newStatus,
-      title: `Change order to ${newStatusName}?`,
-      message,
-    });
-  };
-
-  /*
-    CONFIRM STATUS CHANGE
-  */
-
-  const confirmStatusUpdate = async () => {
-    const newStatus =
-      confirmModal.status;
-
-    if (!newStatus || !order) {
-      setConfirmModal({
-        open: false,
-        status: null,
-        title: "",
-        message: "",
-      });
-
-      return;
-    }
-
-    setConfirmModal({
-      open: false,
-      status: null,
-      title: "",
-      message: "",
-    });
-
-    try {
-      setUpdating(true);
-      setError("");
-
-      const token =
-        localStorage.getItem("access_token");
-
-      if (!token) {
-        router.push("/admin/login");
-        return;
-      }
-
-      const response = await fetch(
-        `${API_URL}/orders/admin/${order.id}/`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            status: newStatus,
-          }),
-        }
-      );
-
-      if (response.status === 401) {
-        localStorage.removeItem(
-          "access_token"
-        );
-
-        localStorage.removeItem(
-          "refresh_token"
-        );
-
-        router.push("/admin/login");
-
-        return;
-      }
-
-      if (response.status === 403) {
-        throw new Error(
-          "You do not have permission to update this order."
-        );
-      }
-
-      if (!response.ok) {
-        const errorData =
-          await response
-            .json()
-            .catch(() => null);
-
-        throw new Error(
-          errorData?.status?.[0] ||
-            errorData?.detail ||
-            "Failed to update order status."
-        );
-      }
-
-      const updatedOrder =
-        await response.json();
-
-      console.log(
-        "UPDATED ADMIN ORDER:",
-        updatedOrder
-      );
-
-      setOrder(updatedOrder);
-
-      setCourier(
-        updatedOrder.courier || ""
-      );
-
-      setTrackingNumber(
-        updatedOrder.tracking_number ||
-          ""
-      );
-
-      setStatus(
-        formatStatus(
-          updatedOrder.status
-        )
-      );
-    } catch (err) {
-      console.error(
-        "UPDATE ORDER ERROR:",
-        err
-      );
-
-      setError(
-        err.message ||
-          "Failed to update order."
-      );
-
-      setStatus(
-        formatStatus(order.status)
-      );
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  /*
-    SAVE SHIPPING DETAILS
-  */
-
-  const saveShippingDetails =
-    async () => {
-      if (!order) return;
-
-      try {
-        setSavingShipping(true);
-        setError("");
-
-        const token =
-          localStorage.getItem(
-            "access_token"
-          );
-
-        if (!token) {
-          router.push("/admin/login");
-          return;
-        }
-
-        const response = await fetch(
-          `${API_URL}/orders/admin/${order.id}/`,
-          {
-            method: "PATCH",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              courier:
-                courier.trim(),
-              tracking_number:
-                trackingNumber.trim(),
-            }),
-          }
-        );
-
-        if (response.status === 401) {
-          localStorage.removeItem(
-            "access_token"
-          );
-
-          localStorage.removeItem(
-            "refresh_token"
-          );
-
-          router.push("/admin/login");
-
-          return;
-        }
-
-        if (response.status === 403) {
-          throw new Error(
-            "You do not have permission to update this order."
-          );
-        }
-
-        if (!response.ok) {
-          const errorData =
-            await response
-              .json()
-              .catch(() => null);
-
-          throw new Error(
-            errorData?.courier?.[0] ||
-              errorData?.tracking_number?.[0] ||
-              errorData?.detail ||
-              "Failed to save shipping details."
-          );
-        }
-
-        const updatedOrder =
-          await response.json();
-
-        setOrder(updatedOrder);
-
-        setCourier(
-          updatedOrder.courier || ""
-        );
-
-        setTrackingNumber(
-          updatedOrder.tracking_number ||
-            ""
-        );
-      } catch (err) {
-        console.error(
-          "SAVE SHIPPING ERROR:",
-          err
-        );
-
-        setError(
-          err.message ||
-            "Failed to save shipping details."
-        );
-      } finally {
-        setSavingShipping(false);
-      }
-    };
-
-  /*
-    HELPERS
-  */
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat(
-      "en-NG",
-      {
-        style: "currency",
-        currency: "NGN",
-        maximumFractionDigits: 0,
-      }
-    ).format(
-      Number(amount || 0)
-    );
-  };
-
-  const getSubtotal = () => {
-    if (!order?.items) {
-      return 0;
-    }
-
-    return order.items.reduce(
-      (total, item) => {
-        return (
-          total +
-          Number(
-            item.subtotal ||
-              Number(
-                item.product_price || 0
-              ) *
-                Number(
-                  item.quantity || 0
-                )
-          )
-        );
-      },
-      0
-    );
-  };
-
-  const getItemCount = () => {
-    if (!order?.items) {
-      return 0;
-    }
-
-    return order.items.reduce(
-      (total, item) =>
-        total +
-        Number(
-          item.quantity || 0
-        ),
-      0
-    );
-  };
-
-  const getProductImage = (
-    item
-  ) => {
-    return (
-      item.product_image ||
-      item.image ||
-      item.product?.image ||
-      null
-    );
-  };
-
-  const getProductName = (
-    item
-  ) => {
-    return (
-      item.product_name ||
-      item.name ||
-      `Product #${item.product || ""}`
-    );
-  };
-
-  const getProductCategory = (
-    item
-  ) => {
-    return (
-      item.variant_size ||
-      item.product_brand ||
-      "ORENTEMIST"
-    );
-  };
-
-  const getOrderDate = () => {
-    if (!order?.created_at) {
-      return "Date unavailable";
-    }
-
-    return new Intl.DateTimeFormat(
-      "en-NG",
-      {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }
-    ).format(
-      new Date(order.created_at)
-    );
-  };
-
-  const getPaymentMethod = () => {
-    if (order?.payment_reference) {
-      return "Paystack";
-    }
-
-    return "Not available";
-  };
-
-  /*
-    PRE-ORDER HELPERS
-  */
-
-  const isPreorderValue = (value) => {
-    return (
-      value === true ||
-      value === "true" ||
-      value === 1 ||
-      value === "1"
-    );
-  };
-
-  const hasPreorderItems =
-    Boolean(
-      order?.items?.some((item) =>
-        isPreorderValue(
-          item.is_preorder
-        )
-      )
-    );
-
-  const getPreorderMessage = (
-    item
-  ) => {
-    return (
-      item.preorder_message ||
-      item.product?.preorder_message ||
-      "This item was purchased as a pre-order."
-    );
-  };
-
-  const getPreorderReleaseDate = (
-    item
-  ) => {
-    const releaseDate =
-      item.preorder_release_date ||
-      item.product?.preorder_release_date ||
-      null;
-
-    if (!releaseDate) {
-      return null;
-    }
-
-    const date =
-      new Date(releaseDate);
-
-    if (
-      Number.isNaN(
-        date.getTime()
-      )
-    ) {
-      return null;
-    }
-
-    return new Intl.DateTimeFormat(
-      "en-NG",
-      {
-        dateStyle: "medium",
-      }
-    ).format(date);
-  };
-
-  /*
-    LOADING
-    KEEP THIS AS IT WAS
-  */
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#f7f7f5] text-black">
-        <AdminSidebar />
-
-        <main className="lg:ml-[250px]">
-          <div className="pt-16 lg:pt-0">
-            <header className="flex h-[82px] items-center justify-between border-b border-black/10 bg-white px-5 sm:px-8">
-              <div>
-                <p className="text-xs text-black/40">
-                  ORENTEMIST ADMIN
-                </p>
-
-                <h2 className="text-xl font-semibold">
-                  Order Details
-                </h2>
-              </div>
-            </header>
-
-            <div className="flex min-h-[70vh] items-center justify-center">
-              <div className="flex items-center gap-3 text-sm text-black/50">
-                <Loader2
-                  size={18}
-                  className="animate-spin"
-                />
-
-                Loading order...
-              </div>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  /*
-    ERROR
-  */
-
-  if (error && !order) {
-    return (
-      <div className="min-h-screen bg-[#f7f7f5] text-black">
-        <AdminSidebar />
-
-        <main className="lg:ml-[250px]">
-          <div className="pt-16 lg:pt-0">
-            <header className="flex h-[82px] items-center justify-between border-b border-black/10 bg-white px-5 sm:px-8">
-              <div>
-                <p className="text-xs text-black/40">
-                  ORENTEMIST ADMIN
-                </p>
-
-                <h2 className="text-xl font-semibold">
-                  Order Details
-                </h2>
-              </div>
-            </header>
-
-            <div className="p-5 sm:p-8">
-              <button
-                onClick={() =>
-                  router.push(
-                    "/admin/orders"
-                  )
-                }
-                className="mb-6 flex items-center gap-2 text-sm text-black/50 transition hover:text-black"
-              >
-                <ArrowLeft size={16} />
-                Back to Orders
-              </button>
-
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-6">
-                <h2 className="font-semibold text-red-700">
-                  Unable to load order
-                </h2>
-
-                <p className="mt-2 text-sm text-red-600">
-                  {error}
-                </p>
-              </div>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  const subtotal = getSubtotal();
-
-  const shippingFee = Number(
-    order?.delivery_fee || 0
-  );
-
-  const discount = (() => {
-    const value = Number(
-      order?.coupon_discount_value || 0
-    );
-
-    if (!value) {
-      return 0;
-    }
-
-    if (
-      order?.coupon_discount_type ===
-      "percentage"
-    ) {
-      return Math.min(
-        subtotal,
-        (subtotal * value) / 100
-      );
-    }
-
-    return Math.min(
-      subtotal,
-      value
-    );
-  })();
-
-  const total = Number(
-    order?.total_amount || 0
-  );
-
-  const paymentStatus =
-    formatStatus(
-      order?.payment_status
-    );
-
-  const canSkipShipping =
-    order?.status === "processing";
-
-  return (
-    <div className="min-h-screen bg-[#f7f7f5] text-black">
-      <AdminSidebar />
-
-      <main className="lg:ml-[250px]">
-        <div className="pt-16 lg:pt-0">
-
-          {/* HEADER */}
-
-          <header className="flex h-[82px] items-center justify-between border-b border-black/10 bg-white px-5 sm:px-8">
-            <div>
-              <p className="text-xs text-black/40">
-                ORENTEMIST ADMIN
-              </p>
-
-              <h2 className="text-xl font-semibold">
-                Order Details
-              </h2>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button className="hidden rounded-xl border border-black/10 p-3 sm:block">
-                <Search size={18} />
-              </button>
-
-              <button className="rounded-xl border border-black/10 p-3">
-                <Bell size={18} />
-              </button>
-
-              <button className="rounded-xl border border-black/10 p-3">
-                <MessageCircle size={18} />
-              </button>
-            </div>
-          </header>
-
-          <div className="p-5 sm:p-8">
-
-            {/* ERROR */}
-
-            {error && (
-              <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
-            {/* TOP */}
-
-            <div className="mb-8 flex flex-col justify-between gap-5 md:flex-row md:items-center">
-
-              <div>
-
-                <button
-                  onClick={() =>
-                    router.push(
-                      "/admin/orders"
-                    )
-                  }
-                  className="mb-4 flex items-center gap-2 text-sm text-black/50 transition hover:text-black"
+from django.conf import settings
+from django.utils.html import escape
+import resend
+
+
+# =========================================================
+# ORENTEMIST EMAIL HELPER
+# =========================================================
+
+def send_orentemist_email(
+    to_email,
+    subject,
+    heading,
+    message,
+    footer_message=None,
+    details=None,
+    items=None,
+):
+    footer = footer_message or (
+        "If you have any questions, please contact "
+        "ORENTEMIST Customer Support."
+    )
+
+    details_html = ""
+
+    if details:
+        detail_rows = ""
+
+        for label, value in details:
+            detail_rows += f"""
+                <tr>
+                    <td style="
+                        padding: 11px 0;
+                        color: #999999;
+                        font-size: 10px;
+                        font-weight: 600;
+                        letter-spacing: 1.5px;
+                        text-transform: uppercase;
+                        vertical-align: top;
+                        width: 40%;
+                    ">
+                        {escape(str(label))}
+                    </td>
+
+                    <td style="
+                        padding: 11px 0;
+                        color: #111111;
+                        font-size: 13px;
+                        line-height: 1.6;
+                        vertical-align: top;
+                    ">
+                        {escape(str(value)).replace(chr(10), "<br>")}
+                    </td>
+                </tr>
+            """
+
+        details_html = f"""
+            <div style="
+                margin: 28px 0;
+                padding: 20px 22px;
+                background: #f8f7f4;
+                border: 1px solid #e5e2dc;
+                border-radius: 16px;
+            ">
+                <table
+                    width="100%"
+                    cellpadding="0"
+                    cellspacing="0"
+                    border="0"
+                    style="border-collapse: collapse;"
                 >
-                  <ArrowLeft size={16} />
-                  Back to Orders
-                </button>
+                    {detail_rows}
+                </table>
+            </div>
+        """
 
-                <div className="flex flex-wrap items-center gap-3">
+    # =====================================================
+    # ORDER ITEMS
+    # =====================================================
 
-                  <h1 className="text-3xl font-semibold tracking-tight">
-                    {order.order_number ||
-                      `#${order.id}`}
-                  </h1>
+    items_html = ""
+    has_preorder_items = False
 
-                  <OrderStatus
-                    status={status}
-                  />
+    if items:
+        item_rows = ""
 
-                  {hasPreorderItems && (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                      Pre-order included
-                    </span>
-                  )}
+        for item in items:
+            product = getattr(item, "product", None)
+
+            product_name = (
+                getattr(product, "name", None)
+                or getattr(item, "product_name", None)
+                or "ORENTEMIST Fragrance"
+            )
+
+            quantity = getattr(item, "quantity", 1)
+
+            price = getattr(
+                item,
+                "product_price",
+                getattr(product, "price", 0),
+            )
+
+            subtotal = getattr(
+                item,
+                "subtotal",
+                None,
+            )
+
+            if subtotal is None:
+                try:
+                    subtotal = price * quantity
+                except Exception:
+                    subtotal = 0
+
+            variant = getattr(item, "variant", None)
+
+            variant_size = ""
+
+            if variant:
+                variant_size = (
+                    getattr(variant, "size", None)
+                    or getattr(variant, "name", None)
+                    or ""
+                )
+
+            # -------------------------------------------------
+            # PRE-ORDER
+            # -------------------------------------------------
+
+            is_preorder = bool(
+                getattr(item, "is_preorder", False)
+            )
+
+            if is_preorder:
+                has_preorder_items = True
+
+            preorder_message = (
+                getattr(item, "preorder_message", None)
+                or getattr(product, "preorder_message", None)
+                or "This item was purchased as a pre-order."
+            )
+
+            preorder_release_date = (
+                getattr(item, "preorder_release_date", None)
+                or getattr(product, "preorder_release_date", None)
+                or None
+            )
+
+            size_html = ""
+
+            if variant_size:
+                size_html = f"""
+                    <div style="
+                        margin-top: 4px;
+                        color: #999999;
+                        font-size: 11px;
+                    ">
+                        Size: {escape(str(variant_size))}
+                    </div>
+                """
+
+            preorder_html = ""
+
+            if is_preorder:
+                release_html = ""
+
+                if preorder_release_date:
+                    release_html = f"""
+                        <div style="
+                            margin-top: 6px;
+                            color: #92400e;
+                            font-size: 11px;
+                            font-weight: 600;
+                        ">
+                            Expected availability:
+                            {escape(str(preorder_release_date))}
+                        </div>
+                    """
+
+                preorder_html = f"""
+                    <div style="
+                        margin-top: 10px;
+                        padding: 10px 12px;
+                        background: #fffbeb;
+                        border: 1px solid #fde68a;
+                        border-radius: 10px;
+                    ">
+                        <div style="
+                            color: #92400e;
+                            font-size: 10px;
+                            font-weight: 700;
+                            letter-spacing: 1px;
+                            text-transform: uppercase;
+                        ">
+                            Pre-order
+                        </div>
+
+                        <div style="
+                            margin-top: 4px;
+                            color: #92400e;
+                            font-size: 11px;
+                            line-height: 1.6;
+                        ">
+                            {escape(str(preorder_message))}
+                        </div>
+
+                        {release_html}
+
+                        <div style="
+                            margin-top: 6px;
+                            color: #92400e;
+                            font-size: 10px;
+                            line-height: 1.5;
+                        ">
+                            Payment received. This item did not
+                            reduce current inventory.
+                        </div>
+                    </div>
+                """
+
+            item_rows += f"""
+                <tr>
+                    <td style="
+                        padding: 15px 0;
+                        border-bottom: 1px solid #eeeeee;
+                    ">
+                        <div style="
+                            color: #111111;
+                            font-size: 14px;
+                            font-weight: 600;
+                            line-height: 1.5;
+                        ">
+                            {escape(str(product_name))}
+                        </div>
+
+                        {size_html}
+
+                        <div style="
+                            margin-top: 5px;
+                            color: #999999;
+                            font-size: 11px;
+                        ">
+                            Qty: {escape(str(quantity))}
+                        </div>
+
+                        {preorder_html}
+                    </td>
+
+                    <td style="
+                        padding: 15px 0;
+                        border-bottom: 1px solid #eeeeee;
+                        text-align: right;
+                        vertical-align: top;
+                        white-space: nowrap;
+                    ">
+                        <div style="
+                            color: #111111;
+                            font-size: 13px;
+                            font-weight: 600;
+                        ">
+                            ₦{float(subtotal):,.2f}
+                        </div>
+
+                        <div style="
+                            margin-top: 5px;
+                            color: #999999;
+                            font-size: 10px;
+                        ">
+                            ₦{float(price):,.2f} each
+                        </div>
+                    </td>
+                </tr>
+            """
+
+        items_html = f"""
+            <div style="margin: 30px 0;">
+
+                <div style="
+                    margin-bottom: 12px;
+                    color: #999999;
+                    font-size: 10px;
+                    font-weight: 600;
+                    letter-spacing: 2px;
+                    text-transform: uppercase;
+                ">
+                    Your Fragrance
+                </div>
+
+                {(
+                    '''
+                    <div style="
+                        margin-bottom: 14px;
+                        padding: 13px 15px;
+                        background: #fffbeb;
+                        border: 1px solid #fde68a;
+                        border-radius: 12px;
+                        color: #92400e;
+                        font-size: 12px;
+                        line-height: 1.6;
+                    ">
+                        <strong>Pre-order included.</strong><br>
+                        Your pre-order item has been paid for in full.
+                        It did not reduce current inventory and will be
+                        prepared according to its availability.
+                    </div>
+                    '''
+                    if has_preorder_items
+                    else ""
+                )}
+
+                <div style="
+                    padding: 5px 20px;
+                    border: 1px solid #e5e2dc;
+                    border-radius: 16px;
+                    background: #ffffff;
+                ">
+
+                    <table
+                        width="100%"
+                        cellpadding="0"
+                        cellspacing="0"
+                        border="0"
+                        style="border-collapse: collapse;"
+                    >
+                        {item_rows}
+                    </table>
 
                 </div>
 
-                <p className="mt-2 text-sm text-black/45">
-                  Placed on{" "}
-                  {getOrderDate()}
-                </p>
+            </div>
+        """
 
-              </div>
+    # =====================================================
+    # HTML EMAIL
+    # =====================================================
 
-              {/* STATUS CONTROLS */}
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+        <title>{escape(str(subject))}</title>
+    </head>
 
-              <div className="flex flex-wrap gap-3">
+    <body style="
+        margin: 0;
+        padding: 0;
+        background: #f4f3f0;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #111111;
+    ">
 
-                {order.status ===
-                  "processing" && (
-                  <div className="flex flex-wrap gap-3">
+        <div style="
+            width: 100%;
+            padding: 40px 15px;
+            box-sizing: border-box;
+        ">
 
-                    <button
-                      onClick={() => {
-                        if (
-                          !courier.trim() ||
-                          !trackingNumber.trim()
-                        ) {
-                          setError(
-                            "Please enter and save the courier and tracking number before marking this order as Shipped."
-                          );
+            <div style="
+                max-width: 600px;
+                margin: 0 auto;
+                background: #ffffff;
+                border: 1px solid #e8e6e1;
+                border-radius: 24px;
+                overflow: hidden;
+            ">
 
-                          return;
-                        }
+                <!-- HEADER -->
 
-                        updateStatus(
-                          "shipped"
-                        );
-                      }}
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {updating ? (
-                        <Loader2
-                          size={16}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Truck size={16} />
-                      )}
+                <div style="
+                    padding: 36px 30px;
+                    border-bottom: 1px solid #eeeeee;
+                    text-align: center;
+                ">
 
-                      Mark as Shipped
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateStatus(
-                          "delivered"
-                        )
-                      }
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-medium transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <CheckCircle2
-                        size={16}
-                      />
-
-                      Skip Shipping
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateStatus(
-                          "cancelled"
-                        )
-                      }
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <AlertTriangle
-                        size={16}
-                      />
-
-                      Cancel Order
-                    </button>
-
-                  </div>
-                )}
-
-                {order.status ===
-                  "shipped" && (
-                  <div className="flex flex-wrap gap-3">
-
-                    <button
-                      onClick={() =>
-                        updateStatus(
-                          "delivered"
-                        )
-                      }
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {updating ? (
-                        <Loader2
-                          size={16}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <CheckCircle2
-                          size={16}
-                        />
-                      )}
-
-                      Mark as Delivered
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateStatus(
-                          "cancelled"
-                        )
-                      }
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <AlertTriangle
-                        size={16}
-                      />
-
-                      Cancel Order
-                    </button>
-
-                  </div>
-                )}
-
-                {order.status ===
-                  "pending" && (
-                  <select
-                    value={order.status}
-                    disabled={updating}
-                    onChange={(e) =>
-                      updateStatus(
-                        e.target.value
-                      )
-                    }
-                    className="rounded-xl bg-black px-4 py-3 text-sm text-white outline-none disabled:opacity-50"
-                  >
-                    <option value="pending">
-                      Pending
-                    </option>
-
-                    <option value="confirmed">
-                      Confirmed
-                    </option>
-
-                    <option value="cancelled">
-                      Cancelled
-                    </option>
-                  </select>
-                )}
-
-                {order.status ===
-                  "confirmed" && (
-                  <select
-                    value={order.status}
-                    disabled={updating}
-                    onChange={(e) =>
-                      updateStatus(
-                        e.target.value
-                      )
-                    }
-                    className="rounded-xl bg-black px-4 py-3 text-sm text-white outline-none disabled:opacity-50"
-                  >
-                    <option value="confirmed">
-                      Confirmed
-                    </option>
-
-                    <option value="processing">
-                      Processing
-                    </option>
-
-                    <option value="cancelled">
-                      Cancelled
-                    </option>
-                  </select>
-                )}
-
-                {order.status ===
-                  "cancelled" && (
-                  <div className="rounded-xl bg-red-50 px-5 py-3 text-sm font-medium text-red-700">
-                    Order Cancelled
-                  </div>
-                )}
-
-                {order.status ===
-                  "delivered" && (
-                  <div className="flex flex-wrap gap-3">
-
-                    <div className="rounded-xl bg-green-50 px-5 py-3 text-sm font-medium text-green-700">
-                      Order Delivered
+                    <div style="
+                        font-size: 22px;
+                        font-weight: 700;
+                        letter-spacing: 5px;
+                        color: #111111;
+                    ">
+                        ORENTEMIST
                     </div>
 
-                    <button
-                      onClick={() =>
-                        updateStatus(
-                          "cancelled"
-                        )
-                      }
-                      disabled={updating}
-                      className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <AlertTriangle
-                        size={16}
-                      />
+                    <div style="
+                        margin-top: 9px;
+                        color: #999999;
+                        font-size: 9px;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
 
-                      Cancel Order
-                    </button>
+                </div>
 
-                  </div>
-                )}
+                <!-- MAIN CONTENT -->
 
-              </div>
-            </div>
+                <div style="
+                    padding: 42px 35px;
+                ">
 
-            {/* CONTENT */}
+                    <p style="
+                        margin: 0 0 12px;
+                        color: #999999;
+                        font-size: 10px;
+                        font-weight: 600;
+                        letter-spacing: 3px;
+                        text-transform: uppercase;
+                    ">
+                        ORENTEMIST
+                    </p>
 
-            <div className="grid gap-6 xl:grid-cols-[1fr_350px]">
+                    <h1 style="
+                        margin: 0 0 18px;
+                        font-size: 29px;
+                        line-height: 1.3;
+                        font-weight: 600;
+                        color: #111111;
+                    ">
+                        {escape(str(heading))}
+                    </h1>
 
-              {/* LEFT */}
+                    <p style="
+                        margin: 0;
+                        color: #666666;
+                        font-size: 15px;
+                        line-height: 1.8;
+                    ">
+                        {message}
+                    </p>
 
-              <div className="space-y-6">
+                    {items_html}
 
-                {/* PRE-ORDER NOTICE */}
+                    {details_html}
 
-                {hasPreorderItems && (
-                  <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                    <div style="
+                        margin-top: 30px;
+                        padding-top: 25px;
+                        border-top: 1px solid #eeeeee;
+                    ">
 
-                    <div className="flex gap-3">
-
-                      <div className="mt-0.5 shrink-0">
-                        <Clock3
-                          size={19}
-                          className="text-amber-700"
-                        />
-                      </div>
-
-                      <div className="min-w-0">
-
-                        <h2 className="text-sm font-semibold text-amber-900">
-                          Pre-order included
-                        </h2>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-800">
-                          This order contains one or more pre-order items. The customer has already paid through Paystack. Pre-order items did not consume current inventory.
+                        <p style="
+                            margin: 0;
+                            color: #888888;
+                            font-size: 12px;
+                            line-height: 1.8;
+                        ">
+                            {escape(str(footer))}
                         </p>
 
-                        <div className="mt-4 rounded-xl border border-amber-200 bg-white/60 p-3">
+                    </div>
 
-                          <p className="text-xs font-semibold text-amber-900">
-                            Fulfillment note
-                          </p>
+                </div>
 
-                          <p className="mt-1 text-xs leading-5 text-amber-800">
-                            Prepare the pre-order item for fulfillment when the fragrance becomes available. Current inventory was not reduced when this order was paid.
-                          </p>
+                <!-- CONTACT FOOTER -->
+
+                <div style="
+                    padding: 34px 30px;
+                    background: #111111;
+                    text-align: center;
+                ">
+
+                    <div style="
+                        color: #ffffff;
+                        font-size: 15px;
+                        font-weight: 600;
+                        letter-spacing: 2px;
+                    ">
+                        ORENTEMIST
+                    </div>
+
+                    <div style="
+                        margin-top: 8px;
+                        color: #999999;
+                        font-size: 9px;
+                        letter-spacing: 2.5px;
+                        text-transform: uppercase;
+                    ">
+                        The Art of Fragrance
+                    </div>
+
+                    <div style="
+                        margin: 24px auto 0;
+                        max-width: 400px;
+                        padding: 20px;
+                        border: 1px solid #333333;
+                        border-radius: 16px;
+                    ">
+
+                        <div style="
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                        ">
+                            Need help with your order?
+                        </div>
+
+                        <div style="
+                            margin-top: 7px;
+                            color: #999999;
+                            font-size: 11px;
+                            line-height: 1.7;
+                        ">
+                            Our Customer Support team is here
+                            to help with your order, delivery,
+                            pickup, or any questions.
+                        </div>
+
+                        <div style="margin-top: 16px;">
+
+                            <a
+                                href="mailto:hello@orentemist.online"
+                                style="
+                                    color: #ffffff;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    text-decoration: none;
+                                "
+                            >
+                                hello@orentemist.online
+                            </a>
 
                         </div>
 
-                      </div>
-
                     </div>
 
-                  </section>
-                )}
-
-                {/* PRODUCTS */}
-
-                <section className="rounded-2xl border border-black/10 bg-white">
-
-                  <div className="flex items-center justify-between border-b border-black/10 px-5 py-5">
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Order Items
-                      </h2>
-
-                      <p className="mt-1 text-xs text-black/40">
-                        {getItemCount()} items
-                      </p>
+                    <div style="
+                        margin-top: 24px;
+                        color: #666666;
+                        font-size: 10px;
+                        line-height: 1.7;
+                    ">
+                        © ORENTEMIST
+                        <br>
+                        Crafted for those who leave an impression.
                     </div>
 
-                    {hasPreorderItems && (
-                      <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-                        Contains Pre-order
-                      </span>
-                    )}
-
-                  </div>
-
-                  <div className="divide-y divide-black/5">
-
-                    {order.items &&
-                    order.items.length >
-                      0 ? (
-                      order.items.map(
-                        (item) => {
-                          const image =
-                            getProductImage(
-                              item
-                            );
-
-                          const isPreorder =
-                            isPreorderValue(
-                              item.is_preorder
-                            );
-
-                          const releaseDate =
-                            getPreorderReleaseDate(
-                              item
-                            );
-
-                          return (
-                            <div
-                              key={
-                                item.id
-                              }
-                              className="flex gap-4 p-5"
-                            >
-
-                              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-black/5">
-
-                                {image ? (
-                                  <img
-                                    src={image}
-                                    alt={getProductName(
-                                      item
-                                    )}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-xs text-black/30">
-                                    No image
-                                  </div>
-                                )}
-
-                              </div>
-
-                              <div className="flex min-w-0 flex-1 flex-col justify-between gap-3 sm:flex-row sm:items-center">
-
-                                <div className="min-w-0">
-
-                                  <div className="flex flex-wrap items-center gap-2">
-
-                                    <h3 className="font-medium">
-                                      {getProductName(
-                                        item
-                                      )}
-                                    </h3>
-
-                                    {isPreorder && (
-                                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                                        Pre-order
-                                      </span>
-                                    )}
-
-                                  </div>
-
-                                  <p className="mt-1 text-xs text-black/40">
-                                    {getProductCategory(
-                                      item
-                                    )}
-                                  </p>
-
-                                  <p className="mt-2 text-xs text-black/50">
-                                    Quantity:{" "}
-                                    {
-                                      item.quantity
-                                    }
-                                  </p>
-
-                                  {isPreorder && (
-                                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-
-                                      <div className="flex items-center gap-2">
-
-                                        <Clock3
-                                          size={14}
-                                          className="shrink-0 text-amber-700"
-                                        />
-
-                                        <p className="text-xs font-semibold text-amber-900">
-                                          Pre-order item
-                                        </p>
-
-                                      </div>
-
-                                      <p className="mt-2 text-xs leading-5 text-amber-800">
-                                        {getPreorderMessage(
-                                          item
-                                        )}
-                                      </p>
-
-                                      {releaseDate && (
-                                        <p className="mt-2 text-xs font-medium text-amber-900">
-                                          Expected availability:{" "}
-                                          {releaseDate}
-                                        </p>
-                                      )}
-
-                                      <p className="mt-2 text-[11px] leading-5 text-amber-700">
-                                        Payment received. This item did not reduce current inventory.
-                                      </p>
-
-                                    </div>
-                                  )}
-
-                                </div>
-
-                                <p className="shrink-0 font-medium">
-                                  {formatCurrency(
-                                    item.subtotal ||
-                                      Number(
-                                        item.product_price ||
-                                          0
-                                      ) *
-                                        Number(
-                                          item.quantity ||
-                                            0
-                                        )
-                                  )}
-                                </p>
-
-                              </div>
-
-                            </div>
-                          );
-                        }
-                      )
-                    ) : (
-                      <div className="p-6 text-center text-sm text-black/40">
-                        No order items found.
-                      </div>
-                    )}
-
-                  </div>
-
-                  <div className="border-t border-black/10 px-5 py-5">
-
-                    <div className="space-y-3 text-sm">
-
-                      <PriceRow
-                        label="Subtotal"
-                        value={formatCurrency(
-                          subtotal
-                        )}
-                      />
-
-                      <PriceRow
-                        label="Shipping"
-                        value={formatCurrency(
-                          shippingFee
-                        )}
-                      />
-
-                      <PriceRow
-                        label="Discount"
-                        value={`-${formatCurrency(
-                          discount
-                        )}`}
-                      />
-
-                      <div className="border-t border-black/10 pt-4">
-
-                        <PriceRow
-                          label="Total"
-                          value={formatCurrency(
-                            total
-                          )}
-                          bold
-                        />
-
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                </section>
-
-                {/* TIMELINE */}
-
-                <section className="rounded-2xl border border-black/10 bg-white p-5 sm:p-6">
-
-                  <h2 className="font-semibold">
-                    Order Timeline
-                  </h2>
-
-                  <div className="mt-6 space-y-6">
-
-                    {order.status_history &&
-                    order.status_history.length >
-                      0 ? (
-                      order.status_history
-                        .slice()
-                        .reverse()
-                        .map(
-                          (history) => (
-                            <TimelineItem
-                              key={
-                                history.id
-                              }
-                              status={
-                                history.status
-                              }
-                              date={
-                                history.created_at
-                              }
-                              changedBy={
-                                history.changed_by
-                              }
-                              note={
-                                history.note
-                              }
-                            />
-                          )
-                        )
-                    ) : (
-                      <>
-                        <TimelineItem
-                          status={
-                            order.status
-                          }
-                          date={
-                            order.created_at
-                          }
-                          changedBy={null}
-                          note="Order status updated."
-                        />
-
-                        {order.payment_status ===
-                          "paid" && (
-                          <TimelineItem
-                            status="paid"
-                            date={
-                              order.created_at
-                            }
-                            changedBy={
-                              null
-                            }
-                            note="Payment successfully received."
-                          />
-                        )}
-
-                        {hasPreorderItems && (
-                          <TimelineItem
-                            status="pre-order"
-                            date={
-                              order.created_at
-                            }
-                            changedBy={
-                              null
-                            }
-                            note="This order contains a pre-order item. Current inventory was not consumed."
-                          />
-                        )}
-
-                        <TimelineItem
-                          status="pending"
-                          date={
-                            order.created_at
-                          }
-                          changedBy={null}
-                          note="Customer created the order."
-                        />
-                      </>
-                    )}
-
-                  </div>
-
-                </section>
-
-              </div>
-
-              {/* RIGHT */}
-
-              <div className="space-y-6">
-
-                {/* CUSTOMER */}
-
-                <section className="rounded-2xl border border-black/10 bg-white p-5">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-white">
-                      <UserRound
-                        size={18}
-                      />
-                    </div>
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Customer
-                      </h2>
-
-                      <p className="text-xs text-black/40">
-                        Customer information
-                      </p>
-                    </div>
-
-                  </div>
-
-                  <div className="mt-5 space-y-4">
-
-                    <InfoRow
-                      label="Name"
-                      value={
-                        order.full_name ||
-                        "Guest Customer"
-                      }
-                    />
-
-                    <InfoRow
-                      label="Email"
-                      value={
-                        order.email ||
-                        "Not provided"
-                      }
-                    />
-
-                    <InfoRow
-                      label="Phone"
-                      value={
-                        order.phone ||
-                        "Not provided"
-                      }
-                    />
-
-                  </div>
-
-                </section>
-
-                {/* DELIVERY */}
-
-                <section className="rounded-2xl border border-black/10 bg-white p-5">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-white">
-                      <MapPin
-                        size={18}
-                      />
-                    </div>
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Delivery Address
-                      </h2>
-
-                      <p className="text-xs text-black/40">
-                        Shipping information
-                      </p>
-                    </div>
-
-                  </div>
-
-                  <div className="mt-5 rounded-xl bg-[#f7f7f5] p-4 text-sm leading-6 text-black/65">
-
-                    {order.delivery_method ===
-                    "pickup" ? (
-                      <>
-                        <p className="font-medium text-black">
-                          Pickup Order
-                        </p>
-
-                        <p className="mt-1">
-                          {order.pickup_address ||
-                            "Pickup location will be provided by ORENTEMIST."}
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p>
-                          {order.address ||
-                            "Address not provided"}
-                        </p>
-
-                        <p>
-                          {order.city || ""}
-                          {order.city &&
-                          order.state
-                            ? ", "
-                            : ""}
-                          {order.state || ""}
-                        </p>
-
-                        <p>
-                          Nigeria
-                        </p>
-                      </>
-                    )}
-
-                  </div>
-
-                </section>
-
-                {/* PAYMENT */}
-
-                <section className="rounded-2xl border border-black/10 bg-white p-5">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-white">
-                      <CreditCard
-                        size={18}
-                      />
-                    </div>
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Payment
-                      </h2>
-
-                      <p className="text-xs text-black/40">
-                        Payment information
-                      </p>
-                    </div>
-
-                  </div>
-
-                  <div className="mt-5 space-y-4">
-
-                    <InfoRow
-                      label="Status"
-                      value={
-                        paymentStatus
-                      }
-                      badge
-                    />
-
-                    <InfoRow
-                      label="Method"
-                      value={
-                        getPaymentMethod()
-                      }
-                    />
-
-                    <InfoRow
-                      label="Amount"
-                      value={formatCurrency(
-                        total
-                      )}
-                    />
-
-                    <InfoRow
-                      label="Reference"
-                      value={
-                        order.payment_reference ||
-                        "Not available"
-                      }
-                    />
-
-                    {hasPreorderItems && (
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-
-                        <p className="text-xs font-semibold text-amber-900">
-                          Pre-order payment
-                        </p>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-800">
-                          The customer paid the full order amount through Paystack. No separate payment is required when the pre-order becomes available.
-                        </p>
-
-                      </div>
-                    )}
-
-                  </div>
-
-                </section>
-
-                {/* SHIPPING / COURIER */}
-
-                <section className="rounded-2xl border border-black/10 bg-white p-5">
-
-                  <div className="flex items-center gap-3">
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black text-white">
-                      <Truck
-                        size={18}
-                      />
-                    </div>
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Shipping & Courier
-                      </h2>
-
-                      <p className="text-xs text-black/40">
-                        Optional delivery information
-                      </p>
-                    </div>
-
-                  </div>
-
-                  <div className="mt-5 space-y-4">
-
-                    <div>
-                      <label className="mb-2 block text-xs font-medium text-black/50">
-                        Courier
-                      </label>
-
-                      <input
-                        type="text"
-                        value={courier}
-                        onChange={(e) =>
-                          setCourier(
-                            e.target.value
-                          )
-                        }
-                        placeholder="e.g. GIG Logistics"
-                        className="w-full rounded-xl border border-black/10 bg-[#f7f7f5] px-4 py-3 text-sm outline-none transition focus:border-black"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-xs font-medium text-black/50">
-                        Tracking Number
-                      </label>
-
-                      <input
-                        type="text"
-                        value={
-                          trackingNumber
-                        }
-                        onChange={(e) =>
-                          setTrackingNumber(
-                            e.target.value
-                          )
-                        }
-                        placeholder="Enter if available"
-                        className="w-full rounded-xl border border-black/10 bg-[#f7f7f5] px-4 py-3 text-sm outline-none transition focus:border-black"
-                      />
-                    </div>
-
-                    <p className="text-xs leading-5 text-black/40">
-                      Courier and tracking number are required before this order can be marked as Shipped. If you want to skip shipping and mark the order as Delivered, you can leave these fields empty.
-                    </p>
-
-                    <button
-                      onClick={
-                        saveShippingDetails
-                      }
-                      disabled={
-                        savingShipping
-                      }
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-medium text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {savingShipping ? (
-                        <>
-                          <Loader2
-                            size={16}
-                            className="animate-spin"
-                          />
-
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Save
-                            size={16}
-                          />
-
-                          Save Shipping Details
-                        </>
-                      )}
-                    </button>
-
-                  </div>
-
-                </section>
-
-                {/* TRACKING */}
-
-                <section className="rounded-2xl border border-black/10 bg-black p-5 text-white">
-
-                  <div className="flex items-center gap-3">
-
-                    <Truck size={19} />
-
-                    <div>
-                      <h2 className="font-semibold">
-                        Tracking
-                      </h2>
-
-                      <p className="text-xs text-white/40">
-                        Delivery tracking information
-                      </p>
-                    </div>
-
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-
-                    <div className="rounded-xl bg-white/10 p-4">
-
-                      <p className="text-xs text-white/40">
-                        Courier
-                      </p>
-
-                      <p className="mt-1 break-all text-sm font-medium">
-                        {order.courier ||
-                          "Not assigned"}
-                      </p>
-
-                    </div>
-
-                    <div className="rounded-xl bg-white/10 p-4">
-
-                      <p className="text-xs text-white/40">
-                        Tracking Number
-                      </p>
-
-                      <p className="mt-1 break-all text-sm font-medium">
-                        {order.tracking_number ||
-                          "Not assigned"}
-                      </p>
-
-                    </div>
-
-                  </div>
-
-                  {order.tracking_number && (
-                    <button
-                      onClick={() => {
-                        alert(
-                          `Courier: ${
-                            order.courier ||
-                            "Not specified"
-                          }\nTracking Number: ${order.tracking_number}`
-                        );
-                      }}
-                      className="mt-4 w-full rounded-xl bg-white px-4 py-3 text-sm font-medium text-black transition hover:bg-white/90"
-                    >
-                      Track Shipment
-                    </button>
-                  )}
-
-                </section>
-
-                {/* PRE-ORDER FULFILLMENT NOTICE */}
-
-                {hasPreorderItems && (
-                  <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-
-                    <div className="flex gap-3">
-
-                      <div className="mt-0.5 shrink-0">
-                        <Clock3
-                          size={18}
-                          className="text-amber-600"
-                        />
-                      </div>
-
-                      <div>
-
-                        <h3 className="text-sm font-semibold text-amber-800">
-                          Pre-order Fulfillment
-                        </h3>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-700">
-                          This order contains a pre-order. The order has already been paid. Do not charge the customer again when the product becomes available.
-                        </p>
-
-                        <p className="mt-2 text-xs leading-5 text-amber-700">
-                          Once the product is ready, fulfill and ship the order normally using the shipping controls above.
-                        </p>
-
-                      </div>
-
-                    </div>
-
-                  </section>
-                )}
-
-                {/* SKIP SHIPPING NOTICE */}
-
-                {canSkipShipping && (
-                  <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-
-                    <div className="flex gap-3">
-
-                      <div className="mt-0.5 shrink-0">
-                        <AlertTriangle
-                          size={18}
-                          className="text-amber-600"
-                        />
-                      </div>
-
-                      <div>
-                        <h3 className="text-sm font-semibold text-amber-800">
-                          Skip Shipping
-                        </h3>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-700">
-                          You can mark this order as Delivered without entering courier or tracking information if the order is being handled directly or does not require shipping.
-                        </p>
-                      </div>
-
-                    </div>
-
-                  </section>
-                )}
-
-              </div>
+                </div>
 
             </div>
 
-          </div>
         </div>
-      </main>
 
-      {/* CONFIRMATION MODAL */}
+    </body>
+    </html>
+    """
 
-      {confirmModal.open && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-5 backdrop-blur-sm"
-          onMouseDown={() =>
-            setConfirmModal({
-              open: false,
-              status: null,
-              title: "",
-              message: "",
-            })
-          }
-        >
-          <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
-            onMouseDown={(e) =>
-              e.stopPropagation()
-            }
-          >
+    # =====================================================
+    # PLAIN TEXT VERSION
+    # =====================================================
 
-            <div className="flex items-start gap-4">
+    plain_text = (
+        "ORENTEMIST\n"
+        "The Art of Fragrance\n\n"
+        f"{heading}\n\n"
+        f"{message}\n\n"
+    )
 
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600">
-                <AlertTriangle
-                  size={21}
-                />
-              </div>
+    if items:
+        plain_text += "YOUR FRAGRANCE\n"
+        plain_text += "------------------------------\n"
 
-              <div className="min-w-0">
+        if has_preorder_items:
+            plain_text += (
+                "PRE-ORDER INCLUDED\n"
+                "Your pre-order item has been paid for in full.\n"
+                "It did not reduce current inventory.\n\n"
+            )
 
-                <h3 className="text-lg font-semibold text-black">
-                  {confirmModal.title}
-                </h3>
+        for item in items:
+            product = getattr(item, "product", None)
 
-                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-black/60">
-                  {confirmModal.message}
-                </p>
+            product_name = (
+                getattr(product, "name", None)
+                or getattr(item, "product_name", None)
+                or "ORENTEMIST Fragrance"
+            )
 
-              </div>
+            quantity = getattr(
+                item,
+                "quantity",
+                1,
+            )
 
-            </div>
+            price = getattr(
+                item,
+                "product_price",
+                getattr(product, "price", 0),
+            )
 
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            subtotal = getattr(
+                item,
+                "subtotal",
+                None,
+            )
 
-              <button
-                type="button"
-                onClick={() =>
-                  setConfirmModal({
-                    open: false,
-                    status: null,
-                    title: "",
-                    message: "",
-                  })
-                }
-                className="rounded-xl border border-black/10 bg-white px-5 py-3 text-sm font-medium text-black transition hover:bg-black/5"
-              >
-                No, Go Back
-              </button>
+            if subtotal is None:
+                try:
+                    subtotal = price * quantity
+                except Exception:
+                    subtotal = 0
 
-              <button
-                type="button"
-                onClick={
-                  confirmStatusUpdate
-                }
-                className="rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-black/90"
-              >
-                Yes, Continue
-              </button>
+            is_preorder = bool(
+                getattr(item, "is_preorder", False)
+            )
 
-            </div>
+            plain_text += (
+                f"{product_name}\n"
+                f"Quantity: {quantity}\n"
+                f"Price: ₦{float(price):,.2f}\n"
+                f"Subtotal: ₦{float(subtotal):,.2f}\n"
+            )
 
-          </div>
-        </div>
-      )}
+            if is_preorder:
+                preorder_message = (
+                    getattr(
+                        item,
+                        "preorder_message",
+                        None,
+                    )
+                    or getattr(
+                        product,
+                        "preorder_message",
+                        None,
+                    )
+                    or "This item was purchased as a pre-order."
+                )
 
-    </div>
-  );
-}
+                preorder_release_date = (
+                    getattr(
+                        item,
+                        "preorder_release_date",
+                        None,
+                    )
+                    or getattr(
+                        product,
+                        "preorder_release_date",
+                        None,
+                    )
+                    or None
+                )
 
-/* ===================================================== */
-/* STATUS BADGE */
-/* ===================================================== */
+                plain_text += (
+                    "\nPRE-ORDER\n"
+                    f"{preorder_message}\n"
+                )
 
-function OrderStatus({ status }) {
-  const normalized =
-    String(status || "")
-      .toLowerCase();
+                if preorder_release_date:
+                    plain_text += (
+                        f"Expected availability: "
+                        f"{preorder_release_date}\n"
+                    )
 
-  const styles = {
-    pending:
-      "bg-amber-50 text-amber-700",
-    confirmed:
-      "bg-blue-50 text-blue-700",
-    processing:
-      "bg-purple-50 text-purple-700",
-    shipped:
-      "bg-indigo-50 text-indigo-700",
-    delivered:
-      "bg-green-50 text-green-700",
-    cancelled:
-      "bg-red-50 text-red-700",
-  };
+                plain_text += (
+                    "Payment received. This item did not "
+                    "reduce current inventory.\n"
+                )
 
-  return (
-    <span
-      className={`rounded-full px-3 py-1 text-xs font-medium ${
-        styles[normalized] ||
-        "bg-black/5 text-black/60"
-      }`}
-    >
-      {formatStatus(status)}
-    </span>
-  );
-}
+            plain_text += "\n"
 
-/* ===================================================== */
-/* PRICE ROW */
-/* ===================================================== */
+    if details:
+        plain_text += "\nORDER DETAILS\n"
+        plain_text += "------------------------------\n"
 
-function PriceRow({
-  label,
-  value,
-  bold = false,
-}) {
-  return (
-    <div
-      className={`flex items-center justify-between ${
-        bold
-          ? "text-base font-semibold"
-          : ""
-      }`}
-    >
-      <span
-        className={
-          bold
-            ? "text-black"
-            : "text-black/50"
+        for label, value in details:
+            plain_text += f"{label}: {value}\n"
+
+        plain_text += "\n"
+
+    plain_text += (
+        f"{footer}\n\n"
+        "ORENTEMIST CUSTOMER SUPPORT\n"
+        "hello@orentemist.online"
+    )
+
+    resend.api_key = settings.RESEND_API_KEY
+
+    response = resend.Emails.send(
+        {
+            "from": "ORENTEMIST <hello@orentemist.online>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": plain_text,
         }
-      >
-        {label}
-      </span>
+    )
 
-      <span>{value}</span>
-    </div>
-  );
-}
+    return response
 
-/* ===================================================== */
-/* INFO ROW */
-/* ===================================================== */
 
-function InfoRow({
-  label,
-  value,
-  badge = false,
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
+# =========================================================
+# ORDER CONFIRMATION
+# =========================================================
 
-      <span className="text-xs text-black/40">
-        {label}
-      </span>
+def send_order_confirmation_email(order):
 
-      {badge ? (
-        <span className="rounded-full bg-black/5 px-3 py-1 text-xs font-medium">
-          {value}
-        </span>
-      ) : (
-        <span className="max-w-[65%] break-words text-right text-sm font-medium">
-          {value}
-        </span>
-      )}
+    subject = (
+        f"Your ORENTEMIST Order Is Confirmed — "
+        f"{order.order_number}"
+    )
 
-    </div>
-  );
-}
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
 
-/* ===================================================== */
-/* TIMELINE ITEM */
-/* ===================================================== */
+    has_preorder_items = any(
+        bool(getattr(item, "is_preorder", False))
+        for item in order.items.all()
+    )
 
-function TimelineItem({
-  status,
-  date,
-  changedBy,
-  note,
-}) {
-  const normalized =
-    String(status || "")
-      .toLowerCase();
+    if getattr(order, "delivery_method", "delivery") == "pickup":
 
-  let Icon = Clock3;
+        fulfillment_message = (
+            "Your fragrance is now being prepared for "
+            "pickup. We will let you know when your order "
+            "is ready to collect."
+        )
 
-  if (
-    normalized === "confirmed" ||
-    normalized === "processing"
-  ) {
-    Icon = PackageCheck;
-  }
+        fulfillment_details = (
+            "Pickup Location",
+            getattr(
+                order,
+                "pickup_address",
+                None,
+            )
+            or "Pickup location will be provided by ORENTEMIST.",
+        )
 
-  if (normalized === "shipped") {
-    Icon = Truck;
-  }
+    else:
 
-  if (normalized === "delivered") {
-    Icon = CheckCircle2;
-  }
+        fulfillment_message = (
+            "Your fragrance is now being prepared for "
+            "delivery to the address provided below."
+        )
 
-  if (normalized === "cancelled") {
-    Icon = AlertTriangle;
-  }
+        shipping_address = (
+            f"{getattr(order, 'address', '')}\n"
+            f"{getattr(order, 'city', '')}, "
+            f"{getattr(order, 'state', '')}"
+        )
 
-  if (normalized === "paid") {
-    Icon = CreditCard;
-  }
+        fulfillment_details = (
+            "Shipping Address",
+            shipping_address
+            if shipping_address.strip()
+            else "Shipping address was not provided.",
+        )
 
-  if (normalized === "pre-order") {
-    Icon = Clock3;
-  }
+    if has_preorder_items:
+        fulfillment_message += (
+            " Your order includes a pre-order item. "
+            "That item has been paid for in full and "
+            "will be prepared according to its availability."
+        )
 
-  return (
-    <div className="flex gap-4">
+    return send_orentemist_email(
+        to_email=order.email,
+        subject=subject,
 
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black text-white">
-        <Icon size={16} />
-      </div>
+        heading="Thank you for your order.",
 
-      <div className="min-w-0 flex-1">
+        message=(
+            f"Hello {escape(str(first_name))}, "
+            "thank you for choosing ORENTEMIST. "
+            "We are delighted to have your order with us. "
+            "Your fragrance has been successfully received "
+            "and our team is preparing it for you. "
+            f"{fulfillment_message} "
+            "We truly appreciate your trust in ORENTEMIST."
+        ),
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        footer_message=(
+            "We will keep you updated as your order moves "
+            "through each stage of fulfillment. "
+            "Thank you for choosing ORENTEMIST — "
+            "we hope your fragrance becomes part of "
+            "your signature."
+        ),
 
-          <p className="text-sm font-medium">
-            {formatStatus(status)}
-          </p>
+        items=order.items.all(),
 
-          {date && (
-            <p className="text-xs text-black/35">
-              {new Intl.DateTimeFormat(
-                "en-NG",
-                {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                }
-              ).format(
-                new Date(date)
-              )}
-            </p>
-          )}
+        details=[
+            (
+                "Order Number",
+                order.order_number,
+            ),
+            (
+                "Customer",
+                order.full_name,
+            ),
+            (
+                "Phone",
+                order.phone,
+            ),
+            (
+                "Email",
+                order.email,
+            ),
+            (
+                "Total",
+                f"₦{order.total_amount:,.2f}",
+            ),
+            (
+                "Payment",
+                str(order.payment_status)
+                .replace("_", " ")
+                .title(),
+            ),
+            (
+                "Status",
+                str(order.status)
+                .replace("_", " ")
+                .title(),
+            ),
+            fulfillment_details,
+        ],
+    )
 
-        </div>
 
-        {note && (
-          <p className="mt-1 text-xs leading-5 text-black/45">
-            {note}
-          </p>
-        )}
+# =========================================================
+# ORDER SHIPPED
+# =========================================================
 
-        {changedBy && (
-          <p className="mt-1 text-xs text-black/35">
-            Changed by {changedBy}
-          </p>
-        )}
+def send_order_shipped_email(order):
 
-      </div>
+    subject = (
+        f"Your ORENTEMIST Order Has Shipped — "
+        f"{order.order_number}"
+    )
 
-    </div>
-  );
-}
+    tracking_number = (
+        order.tracking_number
+        or "Not provided"
+    )
 
-/* ===================================================== */
-/* FORMAT STATUS */
-/* ===================================================== */
+    courier = (
+        order.courier
+        or "Not provided"
+    )
 
-function formatStatus(value) {
-  if (!value) {
-    return "";
-  }
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
 
-  return String(value)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) =>
-      char.toUpperCase()
-    );
-}
+    shipping_address = (
+        f"{getattr(order, 'address', '')}\n"
+        f"{getattr(order, 'city', '')}, "
+        f"{getattr(order, 'state', '')}"
+    )
+
+    return send_orentemist_email(
+        to_email=order.email,
+        subject=subject,
+
+        heading="Your fragrance is on its way.",
+
+        message=(
+            f"Hello {escape(str(first_name))}, "
+            "good news — your ORENTEMIST fragrance "
+            "has left us and is now on its way to you. "
+            "We hope you're excited to receive it."
+        ),
+
+        footer_message=(
+            "You can use the tracking information above "
+            "with the courier to follow your delivery. "
+            "Thank you for choosing ORENTEMIST."
+        ),
+
+        items=order.items.all(),
+
+        details=[
+            (
+                "Order Number",
+                order.order_number,
+            ),
+            (
+                "Courier",
+                courier,
+            ),
+            (
+                "Tracking Number",
+                tracking_number,
+            ),
+            (
+                "Shipping Address",
+                shipping_address,
+            ),
+        ],
+    )
+
+
+# =========================================================
+# ORDER DELIVERED
+# =========================================================
+
+def send_order_delivered_email(order):
+
+    subject = (
+        f"Your ORENTEMIST Order Has Been Delivered — "
+        f"{order.order_number}"
+    )
+
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
+
+    delivery_address = (
+        f"{getattr(order, 'address', '')}\n"
+        f"{getattr(order, 'city', '')}, "
+        f"{getattr(order, 'state', '')}"
+    )
+
+    return send_orentemist_email(
+        to_email=order.email,
+        subject=subject,
+
+        heading="Your fragrance has arrived.",
+
+        message=(
+            f"Hello {escape(str(first_name))}, "
+            "your ORENTEMIST order has been successfully "
+            "delivered. Your fragrance is now yours to enjoy. "
+            "We hope it becomes a beautiful part of your "
+            "everyday moments and leaves an impression "
+            "wherever you go."
+        ),
+
+        footer_message=(
+            "Thank you for choosing ORENTEMIST. "
+            "We are grateful to have you as part of "
+            "our fragrance journey."
+        ),
+
+        items=order.items.all(),
+
+        details=[
+            (
+                "Order Number",
+                order.order_number,
+            ),
+            (
+                "Total",
+                f"₦{order.total_amount:,.2f}",
+            ),
+            (
+                "Delivery Address",
+                delivery_address,
+            ),
+        ],
+    )
+
+
+# =========================================================
+# ORDER REFUND
+# =========================================================
+
+def send_order_refund_email(order, refund):
+
+    subject = (
+        f"ORENTEMIST Refund Processed — "
+        f"{order.order_number}"
+    )
+
+    refund_reference = (
+        refund.paystack_reference
+        or "N/A"
+    )
+
+    refund_reason = (
+        refund.reason
+        or "Order cancelled"
+    )
+
+    first_name = (
+        order.full_name.split()[0]
+        if order.full_name
+        else "there"
+    )
+
+    return send_orentemist_email(
+        to_email=order.email,
+        subject=subject,
+
+        heading="Your refund has been processed.",
+
+        message=(
+            f"Hello {escape(str(first_name))}, "
+            "your ORENTEMIST order has been cancelled "
+            "and your refund has been requested through "
+            "our payment provider. "
+            "We understand that plans can change, and "
+            "we appreciate your patience while the refund "
+            "is completed."
+        ),
+
+        footer_message=(
+            "The time required for refunded funds to appear "
+            "in your account may depend on your bank or "
+            "payment provider. If you have any questions, "
+            "please contact ORENTEMIST Customer Support."
+        ),
+
+        items=order.items.all(),
+
+        details=[
+            (
+                "Order Number",
+                order.order_number,
+            ),
+            (
+                "Refund Amount",
+                f"₦{refund.amount:,.2f}",
+            ),
+            (
+                "Refund Reference",
+                refund_reference,
+            ),
+            (
+                "Reason",
+                refund_reason,
+            ),
+        ],
+    )
