@@ -413,7 +413,6 @@ def calculate_audience(
 # =========================================================
 # NEWSLETTER HTML
 # =========================================================
-
 def build_newsletter_html(
     hero_image="",
     content_image="",
@@ -427,8 +426,8 @@ def build_newsletter_html(
     )
 
     safe_content_image = escape(
-    content_image or ""
-)
+        content_image or ""
+    )
 
     safe_heading = escape(
         heading or ""
@@ -479,40 +478,33 @@ def build_newsletter_html(
         </tr>
         """
 
-
-
-
-
-
-
     content_image_html = ""
 
     if safe_content_image:
-       content_image_html = f"""
-    <tr>
-        <td
-            style="
-                padding:0 40px 30px 40px;
-                margin:0;
-            "
-        >
-            <img
-                src="{safe_content_image}"
-                alt="ORENTEMIST"
-                width="520"
+        content_image_html = f"""
+        <tr>
+            <td
                 style="
-                    display:block;
-                    width:100%;
-                    max-width:520px;
-                    height:auto;
-                    border:0;
-                    margin:0 auto;
+                    padding:0 40px 30px 40px;
+                    margin:0;
                 "
-            />
-        </td>
-    </tr>
-    """
-
+            >
+                <img
+                    src="{safe_content_image}"
+                    alt="ORENTEMIST"
+                    width="520"
+                    style="
+                        display:block;
+                        width:100%;
+                        max-width:520px;
+                        height:auto;
+                        border:0;
+                        margin:0 auto;
+                    "
+                />
+            </td>
+        </tr>
+        """
 
     button_html = ""
 
@@ -525,7 +517,8 @@ def build_newsletter_html(
             <td
                 align="center"
                 style="
-                    padding:10px 40px 40px 40px;
+                    padding:5px 40px 45px 40px;
+                    font-family:Arial,Helvetica,sans-serif;
                 "
             >
                 <a
@@ -535,11 +528,12 @@ def build_newsletter_html(
                         background:#000000;
                         color:#ffffff;
                         text-decoration:none;
-                        padding:14px 28px;
-                        border-radius:8px;
+                        padding:15px 32px;
+                        border-radius:6px;
                         font-family:Arial,Helvetica,sans-serif;
                         font-size:14px;
-                        font-weight:600;
+                        font-weight:700;
+                        letter-spacing:0.3px;
                     "
                 >
                     {safe_button_text}
@@ -553,6 +547,7 @@ def build_newsletter_html(
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
 
     <meta
@@ -561,13 +556,14 @@ def build_newsletter_html(
     >
 
     <title>ORENTEMIST</title>
+
 </head>
 
 <body
     style="
         margin:0;
         padding:0;
-        background:#f5f5f5;
+        background:#f4f4f4;
     "
 >
 
@@ -580,11 +576,12 @@ def build_newsletter_html(
         width:100%;
         margin:0;
         padding:0;
-        background:#f5f5f5;
+        background:#f4f4f4;
     "
 >
 
 <tr>
+
 <td
     align="center"
     style="
@@ -605,32 +602,53 @@ def build_newsletter_html(
     "
 >
 
+<!-- BRAND HEADER -->
+
 <tr>
+
 <td
     align="center"
     style="
-        padding:30px 30px 20px 30px;
+        padding:32px 30px 24px 30px;
         font-family:Arial,Helvetica,sans-serif;
     "
 >
 
 <div
     style="
-        font-size:20px;
+        font-size:21px;
         font-weight:700;
-        letter-spacing:4px;
+        letter-spacing:5px;
         color:#000000;
     "
 >
     ORENTEMIST
 </div>
 
+<div
+    style="
+        margin-top:8px;
+        font-size:10px;
+        letter-spacing:2px;
+        color:#999999;
+        text-transform:uppercase;
+    "
+>
+    Fragrance • Identity • Expression
+</div>
+
 </td>
+
 </tr>
+
+<!-- HERO IMAGE -->
 
 {hero_html}
 
+<!-- HEADING -->
+
 <tr>
+
 <td
     style="
         padding:40px 40px 20px 40px;
@@ -651,13 +669,16 @@ def build_newsletter_html(
 </h1>
 
 </td>
+
 </tr>
 
+<!-- BODY -->
 
 <tr>
+
 <td
     style="
-        padding:0 40px 30px 40px;
+        padding:0 40px 25px 40px;
         font-family:Arial,Helvetica,sans-serif;
     "
 >
@@ -673,55 +694,264 @@ def build_newsletter_html(
 </div>
 
 </td>
+
 </tr>
+
+<!-- CONTENT IMAGE -->
 
 {content_image_html}
 
+<!-- CTA BUTTON -->
+
+{button_html}
+
+<!-- PREMIUM FOOTER -->
+
+<tr>
 
 <td
-    align="center"
     style="
-        padding:30px 40px;
-        border-top:1px solid #eeeeee;
+        background:#111111;
+        padding:45px 40px 35px 40px;
         font-family:Arial,Helvetica,sans-serif;
+        text-align:center;
+    "
+>
+
+<!-- FOOTER BRAND -->
+
+<div
+    style="
+        font-size:20px;
+        font-weight:700;
+        letter-spacing:5px;
+        color:#ffffff;
+    "
+>
+    ORENTEMIST
+</div>
+
+<div
+    style="
+        margin-top:10px;
+        font-size:11px;
+        letter-spacing:2px;
+        color:#aaaaaa;
+        text-transform:uppercase;
+    "
+>
+    Fragrance • Identity • Expression
+</div>
+
+<!-- DIVIDER -->
+
+<div
+    style="
+        width:50px;
+        height:1px;
+        background:#555555;
+        margin:25px auto;
+    "
+></div>
+
+<!-- DESCRIPTION -->
+
+<p
+    style="
+        margin:0 auto;
+        max-width:430px;
+        color:#bdbdbd;
+        font-size:13px;
+        line-height:1.8;
+    "
+>
+    Discover fragrances that become part of your identity.
+    ORENTEMIST brings together carefully selected scents
+    designed to leave a lasting impression.
+</p>
+
+<!-- CONTACT -->
+
+<p
+    style="
+        margin:25px 0 0 0;
+        color:#ffffff;
+        font-size:13px;
+        line-height:1.7;
+    "
+>
+
+    <a
+        href="https://www.orentemist.online"
+        style="
+            color:#ffffff;
+            text-decoration:none;
+        "
+    >
+        www.orentemist.online
+    </a>
+
+    <br>
+
+    <a
+        href="mailto:hello@orentemist.online"
+        style="
+            color:#bdbdbd;
+            text-decoration:none;
+        "
+    >
+        hello@orentemist.online
+    </a>
+
+</p>
+
+<!-- SOCIAL LINKS -->
+
+<p
+    style="
+        margin:25px 0 0 0;
+        font-size:12px;
+    "
+>
+
+    <a
+        href="https://www.orentemist.online"
+        style="
+            color:#ffffff;
+            text-decoration:none;
+            margin:0 8px;
+        "
+    >
+        WEBSITE
+    </a>
+
+    <span
+        style="
+            color:#555555;
+        "
+    >
+        •
+    </span>
+
+    <a
+        href="https://www.orentemist.online"
+        style="
+            color:#ffffff;
+            text-decoration:none;
+            margin:0 8px;
+        "
+    >
+        SHOP
+    </a>
+
+</p>
+
+</td>
+
+</tr>
+
+<!-- EMAIL PREFERENCES -->
+
+<tr>
+
+<td
+    style="
+        background:#111111;
+        padding:0 40px 40px 40px;
+        font-family:Arial,Helvetica,sans-serif;
+        text-align:center;
+    "
+>
+
+<div
+    style="
+        border-top:1px solid #333333;
+        padding-top:25px;
     "
 >
 
 <p
     style="
         margin:0;
-        color:#999999;
-        font-size:12px;
-        line-height:1.6;
+        color:#777777;
+        font-size:11px;
+        line-height:1.7;
     "
 >
-    You are receiving this email from ORENTEMIST.
+    You are receiving this email because you subscribed
+    to the ORENTEMIST newsletter.
 </p>
 
 <p
     style="
-        margin:10px 0 0 0;
-        color:#999999;
-        font-size:12px;
+        margin:12px 0 0 0;
+        font-size:11px;
     "
 >
-    ORENTEMIST
+
+    <a
+        href="https://www.orentemist.online"
+        style="
+            color:#aaaaaa;
+            text-decoration:underline;
+        "
+    >
+        Manage Preferences
+    </a>
+
+    &nbsp;&nbsp;
+
+    <span
+        style="
+            color:#555555;
+        "
+    >
+        |
+    </span>
+
+    &nbsp;&nbsp;
+
+    <a
+        href="https://www.orentemist.online"
+        style="
+            color:#aaaaaa;
+            text-decoration:underline;
+        "
+    >
+        Unsubscribe
+    </a>
+
 </p>
 
+<p
+    style="
+        margin:20px 0 0 0;
+        color:#666666;
+        font-size:10px;
+        line-height:1.6;
+    "
+>
+    © 2026 ORENTEMIST. All rights reserved.
+</p>
+
+</div>
+
 </td>
+
 </tr>
 
 </table>
 
 </td>
+
 </tr>
 
 </table>
 
 </body>
+
 </html>
 """
-
 
 # =========================================================
 # SUBSCRIBE
