@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.utils import timezone
 from django.utils.html import escape
+from django.core.files.storage import default_storage
 
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
@@ -2012,6 +2013,47 @@ class NewsletterCampaignSendDraftView(
                 error
             )
 
+
+
+
+class NewsletterImageUploadView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        image = request.FILES.get("image")
+
+        if not image:
+            return Response(
+                {"error": "Image file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            filename = default_storage.save(
+                f"newsletter/{image.name}",
+                image,
+            )
+
+            image_url = default_storage.url(filename)
+
+            return Response(
+                {
+                    "url": image_url,
+                    "filename": filename,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except Exception as error:
+            return Response(
+                {
+                    "error": "Unable to upload newsletter image.",
+                    "message": str(error),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        
 # =========================================================
 # TEST EMAIL
 # =========================================================
@@ -2324,3 +2366,5 @@ class NewsletterCampaignRefreshView(
             return brevo_error_response(
                 error
             )
+
+

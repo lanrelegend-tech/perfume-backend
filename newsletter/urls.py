@@ -10,6 +10,7 @@ from .views import (
     NewsletterSubscribersView,
     NewsletterTemplatesView,
     NewsletterUnsubscribeView,
+    NewsletterImageUploadView,
 )
 
 
@@ -49,6 +50,12 @@ urlpatterns = [
         NewsletterCampaignsView.as_view(),
         name="newsletter-campaigns",
     ),
+
+    path(
+    "upload-image/",
+    NewsletterImageUploadView.as_view(),
+    name="newsletter-upload-image",
+),
 
     path(
         "campaigns/<int:pk>/send/",
