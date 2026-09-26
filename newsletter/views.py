@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.utils import timezone
@@ -14,13 +14,15 @@ from orders.models import Order
 
 from .brevo import (
     add_brevo_contacts_to_list,
-    create_brevo_contact,
     create_brevo_html_campaign,
     create_brevo_list,
+    create_brevo_contact,
+    delete_brevo_campaign,
     delete_brevo_list,
     get_brevo_campaign,
     get_brevo_campaigns,
     get_brevo_list,
+    remove_all_brevo_contacts_from_list,
     send_brevo_draft_campaign,
     send_brevo_test,
     unsubscribe_brevo_contact,
@@ -37,9 +39,32 @@ from .serializers import (
 )
 
 
-# ============================================================
-# HELPERS
-# ============================================================
+User = get_user_model()
+
+
+# =========================================================
+# GENERAL HELPERS
+# =========================================================
+
+def normalize_email(email):
+    return (
+        str(email or "")
+        .strip()
+        .lower()
+    )
+
+
+def normalize_email_set(values):
+    result = set()
+
+    for email in values:
+        email = normalize_email(email)
+
+        if email:
+            result.add(email)
+
+    return result
+
 
 def brevo_error_response(error):
     return Response(
@@ -51,24 +76,12 @@ def brevo_error_response(error):
     )
 
 
-def normalize_email(email):
-    return (
-        str(email or "")
-        .strip()
-        .lower()
-    )
+# =========================================================
+# AUDIENCE ENGINE
+# =========================================================
 
-
-def clean_email_set(emails):
-    return {
-        normalize_email(email)
-        for email in emails
-        if normalize_email(email)
-    }
-
-
-def get_active_subscriber_emails():
-    return clean_email_set(
+def get_subscriber_emails():
+    return normalize_email_set(
         NewsletterSubscriber.objects
         .filter(
             is_subscribed=True
@@ -81,7 +94,7 @@ def get_active_subscriber_emails():
 
 
 def get_registered_user_emails():
-    return clean_email_set(
+    return normalize_email_set(
         User.objects
         .exclude(
             email=""
@@ -94,7 +107,7 @@ def get_registered_user_emails():
 
 
 def get_customer_emails():
-    return clean_email_set(
+    return normalize_email_set(
         Order.objects
         .filter(
             payment_status="paid"
@@ -109,236 +122,325 @@ def get_customer_emails():
     )
 
 
-def get_audience_emails(
-    include,
-    selected_subscriber_ids=None,
-    exclude_emails=None,
+def get_selected_subscriber_emails(
+    selected_ids,
 ):
-    """
-    Marketing-consent rule:
+    clean_ids = []
 
-    Only active NewsletterSubscriber contacts are eligible
-    for promotional campaigns.
-
-    Registered users and customers are therefore filters
-    inside the consented newsletter population.
-    """
-
-    active_subscribers = (
-        get_active_subscriber_emails()
-    )
-
-    registered_users = (
-        get_registered_user_emails()
-    )
-
-    customers = (
-        get_customer_emails()
-    )
-
-    include = set(
-        include or []
-    )
-
-    selected_subscriber_ids = (
-        selected_subscriber_ids or []
-    )
-
-    exclude_emails = clean_email_set(
-        exclude_emails or []
-    )
-
-    if "selected" in include:
-        selected_ids = set()
-
-        for value in selected_subscriber_ids:
-            try:
-                selected_ids.add(
-                    int(value)
-                )
-            except (
-                TypeError,
-                ValueError,
-            ):
-                continue
-
-        selected_emails = clean_email_set(
-            NewsletterSubscriber.objects
-            .filter(
-                id__in=selected_ids,
-                is_subscribed=True,
+    for value in selected_ids or []:
+        try:
+            clean_ids.append(
+                int(value)
             )
-            .values_list(
-                "email",
-                flat=True,
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+    if not clean_ids:
+        return set()
+
+    return normalize_email_set(
+        NewsletterSubscriber.objects
+        .filter(
+            id__in=clean_ids,
+            is_subscribed=True,
+        )
+        .values_list(
+            "email",
+            flat=True,
+        )
+    )
+
+
+def normalize_audience_list(
+    value,
+):
+    if value is None:
+        return []
+
+    if isinstance(
+        value,
+        str,
+    ):
+        value = [
+            value
+        ]
+
+    return [
+        str(item)
+        .strip()
+        .lower()
+        for item in value
+        if str(item).strip()
+    ]
+
+
+def get_audience_config(
+    data,
+):
+    recipient_type = (
+        str(
+            data.get(
+                "recipient_type",
+                "",
             )
         )
-
-        audience = selected_emails
-
-    else:
-        audience = set()
-
-        if "subscribers" in include:
-            audience.update(
-                active_subscribers
-            )
-
-        if "users" in include:
-            audience.update(
-                active_subscribers
-                & registered_users
-            )
-
-        if "customers" in include:
-            audience.update(
-                active_subscribers
-                & customers
-            )
-
-        if "everyone" in include:
-            audience.update(
-                active_subscribers
-            )
-
-    before_exclusion = set(
-        audience
+        .strip()
+        .lower()
     )
 
-    audience -= exclude_emails
+    include = normalize_audience_list(
+        data.get("include")
+    )
+
+    exclude = normalize_audience_list(
+        data.get("exclude")
+    )
+
+    exclude_emails = normalize_email_set(
+        data.get(
+            "exclude_emails",
+            [],
+        )
+        or []
+    )
+
+    selected_ids = (
+        data.get(
+            "selected_subscriber_ids",
+            [],
+        )
+        or data.get(
+            "recipient_ids",
+            [],
+        )
+        or []
+    )
+
+    # Frontend sends recipient_type, so use it
+    # when include is missing.
+    if not include:
+        if recipient_type:
+            include = [
+                recipient_type
+            ]
+        else:
+            include = [
+                "subscribers"
+            ]
+
+    # "both" means registered users + paid customers.
+    if "both" in include:
+        include = [
+            item
+            for item in include
+            if item != "both"
+        ]
+
+        include.extend(
+            [
+                "users",
+                "customers",
+            ]
+        )
+
+    # "everyone" already represents the complete
+    # available audience, so don't combine it with
+    # other include groups.
+    if "everyone" in include:
+        include = [
+            "everyone"
+        ]
+
+    allowed = {
+        "subscribers",
+        "users",
+        "customers",
+        "everyone",
+        "selected",
+    }
+
+    include = [
+        item
+        for item in include
+        if item in allowed
+    ]
+
+    exclude = [
+        item
+        for item in exclude
+        if item in allowed
+        and item != "everyone"
+    ]
 
     return {
-        "emails": audience,
-        "excluded_count": (
-            len(before_exclusion)
-            - len(audience)
+        "recipient_type": (
+            recipient_type
+            or include[0]
         ),
-        "available": {
-            "subscribers": len(
-                active_subscribers
-            ),
-            "users": len(
-                active_subscribers
-                & registered_users
-            ),
-            "customers": len(
-                active_subscribers
-                & customers
-            ),
-            "everyone": len(
-                active_subscribers
-            ),
-        },
+        "include": list(
+            dict.fromkeys(include)
+        ),
+        "exclude": list(
+            dict.fromkeys(exclude)
+        ),
+        "exclude_emails": sorted(
+            exclude_emails
+        ),
+        "selected_subscriber_ids": [
+            value
+            for value in selected_ids
+        ],
     }
 
 
-def get_folder_id_for_newsletter_list():
-    """
-    Use the folder containing the existing
-    BREVO_LIST_ID so campaign-specific lists
-    are kept alongside the newsletter list.
-    """
-
-    configured_list_id = (
-        settings.BREVO_LIST_ID
-    )
-
-    if not configured_list_id:
-        raise RuntimeError(
-            "BREVO_LIST_ID is not configured."
-        )
-
-    list_data = get_brevo_list(
-        int(configured_list_id)
-    )
-
-    folder_id = list_data.get(
-        "folderId"
-    )
-
-    if not folder_id:
-        raise RuntimeError(
-            "Unable to determine the Brevo folder for the newsletter list."
-        )
-
-    return int(folder_id)
-
-
-def create_campaign_recipient_list(
-    campaign_name,
-    emails,
+def calculate_audience(
+    data,
 ):
-    """
-    Creates a dedicated Brevo list containing the
-    exact recipients for this campaign.
-
-    This gives every campaign its own recipient snapshot.
-    """
-
-    if not emails:
-        raise RuntimeError(
-            "Cannot create a recipient list with zero recipients."
-        )
-
-    folder_id = (
-        get_folder_id_for_newsletter_list()
+    config = get_audience_config(
+        data
     )
 
-    safe_name = (
-        str(campaign_name)
-        .strip()
-        .replace(
-            "\n",
-            " ",
-        )
-        .replace(
-            "\r",
-            " ",
+    subscriber_emails = (
+        get_subscriber_emails()
+    )
+
+    user_emails = (
+        get_registered_user_emails()
+    )
+
+    customer_emails = (
+        get_customer_emails()
+    )
+
+    selected_emails = (
+        get_selected_subscriber_emails(
+            config[
+                "selected_subscriber_ids"
+            ]
         )
     )
 
-    if len(safe_name) > 150:
-        safe_name = safe_name[:150]
-
-    list_data = create_brevo_list(
-        name=(
-            f"ORENTEMIST Campaign - "
-            f"{safe_name}"
+    counts = {
+        "subscribers": len(
+            subscriber_emails
         ),
-        folder_id=folder_id,
+
+        "users": len(
+            user_emails
+        ),
+
+        "customers": len(
+            customer_emails
+        ),
+
+        "both": len(
+            user_emails |
+            customer_emails
+        ),
+
+        "everyone": len(
+            subscriber_emails |
+            user_emails |
+            customer_emails
+        ),
+
+        "selected": len(
+            selected_emails
+        ),
+    }
+
+    audience_sets = {
+        "subscribers": subscriber_emails,
+        "users": user_emails,
+        "customers": customer_emails,
+        "selected": selected_emails,
+    }
+
+    recipient_emails = set()
+
+    for group in config[
+        "include"
+    ]:
+        if group == "everyone":
+            recipient_emails.update(
+                subscriber_emails |
+                user_emails |
+                customer_emails
+            )
+        elif group in audience_sets:
+            recipient_emails.update(
+                audience_sets[group]
+            )
+
+    before_exclusion_count = len(
+        recipient_emails
     )
 
-    list_id = list_data.get(
-        "id"
+    # Remove whole audience groups.
+    for group in config[
+        "exclude"
+    ]:
+        if group == "subscribers":
+            recipient_emails -= (
+                subscriber_emails
+            )
+
+        elif group == "users":
+            recipient_emails -= (
+                user_emails
+            )
+
+        elif group == "customers":
+            recipient_emails -= (
+                customer_emails
+            )
+
+        elif group == "selected":
+            recipient_emails -= (
+                selected_emails
+            )
+
+    # Remove individual emails.
+    recipient_emails -= set(
+        config[
+            "exclude_emails"
+        ]
     )
 
-    if not list_id:
-        raise RuntimeError(
-            "Brevo did not return the new recipient list ID."
-        )
-
-    result = add_brevo_contacts_to_list(
-        list_id=list_id,
-        emails=emails,
+    recipient_emails = sorted(
+        recipient_emails
     )
 
-    failed = result.get(
-        "failure",
-        [],
+    excluded_count = (
+        before_exclusion_count
+        - len(recipient_emails)
     )
 
-    if failed:
-        delete_brevo_list(
-            list_id
-        )
+    return {
+        "recipient_emails": (
+            recipient_emails
+        ),
 
-        raise RuntimeError(
-            "Brevo could not add all campaign recipients. "
-            f"Failed contacts: {len(failed)}."
-        )
+        "recipient_count": len(
+            recipient_emails
+        ),
 
-    return int(list_id)
+        "excluded_count": (
+            excluded_count
+        ),
 
+        "counts": counts,
+
+        "audience_config": config,
+    }
+
+
+# =========================================================
+# NEWSLETTER HTML
+# =========================================================
 
 def build_newsletter_html(
     hero_image="",
@@ -437,12 +539,15 @@ def build_newsletter_html(
     return f"""
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0"
     >
+
     <title>ORENTEMIST</title>
 </head>
 
@@ -453,153 +558,171 @@ def build_newsletter_html(
         background:#f5f5f5;
     "
 >
-    <table
-        width="100%"
-        cellpadding="0"
-        cellspacing="0"
-        border="0"
-        style="
-            width:100%;
-            margin:0;
-            padding:0;
-            background:#f5f5f5;
-        "
-    >
-        <tr>
-            <td
-                align="center"
-                style="
-                    padding:30px 15px;
-                "
-            >
-                <table
-                    width="600"
-                    cellpadding="0"
-                    cellspacing="0"
-                    border="0"
-                    style="
-                        width:100%;
-                        max-width:600px;
-                        background:#ffffff;
-                        margin:0 auto;
-                    "
-                >
 
-                    <tr>
-                        <td
-                            align="center"
-                            style="
-                                padding:30px 30px 20px 30px;
-                                font-family:Arial,Helvetica,sans-serif;
-                            "
-                        >
-                            <div
-                                style="
-                                    font-size:20px;
-                                    font-weight:700;
-                                    letter-spacing:4px;
-                                    color:#000000;
-                                "
-                            >
-                                ORENTEMIST
-                            </div>
-                        </td>
-                    </tr>
+<table
+    width="100%"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        margin:0;
+        padding:0;
+        background:#f5f5f5;
+    "
+>
 
-                    {hero_html}
+<tr>
+<td
+    align="center"
+    style="
+        padding:30px 15px;
+    "
+>
 
-                    <tr>
-                        <td
-                            style="
-                                padding:40px 40px 20px 40px;
-                                font-family:Arial,Helvetica,sans-serif;
-                            "
-                        >
-                            <h1
-                                style="
-                                    margin:0;
-                                    color:#000000;
-                                    font-size:30px;
-                                    line-height:1.25;
-                                    font-weight:700;
-                                "
-                            >
-                                {safe_heading}
-                            </h1>
-                        </td>
-                    </tr>
+<table
+    width="600"
+    cellpadding="0"
+    cellspacing="0"
+    border="0"
+    style="
+        width:100%;
+        max-width:600px;
+        background:#ffffff;
+        margin:0 auto;
+    "
+>
 
-                    <tr>
-                        <td
-                            style="
-                                padding:0 40px 30px 40px;
-                                font-family:Arial,Helvetica,sans-serif;
-                            "
-                        >
-                            <div
-                                style="
-                                    color:#444444;
-                                    font-size:16px;
-                                    line-height:1.8;
-                                "
-                            >
-                                {safe_body}
-                            </div>
-                        </td>
-                    </tr>
+<tr>
+<td
+    align="center"
+    style="
+        padding:30px 30px 20px 30px;
+        font-family:Arial,Helvetica,sans-serif;
+    "
+>
 
-                    {button_html}
+<div
+    style="
+        font-size:20px;
+        font-weight:700;
+        letter-spacing:4px;
+        color:#000000;
+    "
+>
+    ORENTEMIST
+</div>
 
-                    <tr>
-                        <td
-                            align="center"
-                            style="
-                                padding:30px 40px;
-                                border-top:1px solid #eeeeee;
-                                font-family:Arial,Helvetica,sans-serif;
-                            "
-                        >
-                            <p
-                                style="
-                                    margin:0;
-                                    color:#999999;
-                                    font-size:12px;
-                                    line-height:1.6;
-                                "
-                            >
-                                You are receiving this email because
-                                you subscribed to the ORENTEMIST newsletter.
-                            </p>
+</td>
+</tr>
 
-                            <p
-                                style="
-                                    margin:10px 0 0 0;
-                                    color:#999999;
-                                    font-size:12px;
-                                "
-                            >
-                                ORENTEMIST
-                            </p>
-                        </td>
-                    </tr>
+{hero_html}
 
-                </table>
-            </td>
-        </tr>
-    </table>
+<tr>
+<td
+    style="
+        padding:40px 40px 20px 40px;
+        font-family:Arial,Helvetica,sans-serif;
+    "
+>
+
+<h1
+    style="
+        margin:0;
+        color:#000000;
+        font-size:30px;
+        line-height:1.25;
+        font-weight:700;
+    "
+>
+    {safe_heading}
+</h1>
+
+</td>
+</tr>
+
+<tr>
+<td
+    style="
+        padding:0 40px 30px 40px;
+        font-family:Arial,Helvetica,sans-serif;
+    "
+>
+
+<div
+    style="
+        color:#444444;
+        font-size:16px;
+        line-height:1.8;
+    "
+>
+    {safe_body}
+</div>
+
+</td>
+</tr>
+
+{button_html}
+
+<tr>
+<td
+    align="center"
+    style="
+        padding:30px 40px;
+        border-top:1px solid #eeeeee;
+        font-family:Arial,Helvetica,sans-serif;
+    "
+>
+
+<p
+    style="
+        margin:0;
+        color:#999999;
+        font-size:12px;
+        line-height:1.6;
+    "
+>
+    You are receiving this email from ORENTEMIST.
+</p>
+
+<p
+    style="
+        margin:10px 0 0 0;
+        color:#999999;
+        font-size:12px;
+    "
+>
+    ORENTEMIST
+</p>
+
+</td>
+</tr>
+
+</table>
+
+</td>
+</tr>
+
+</table>
+
 </body>
 </html>
 """
 
 
-# ============================================================
+# =========================================================
 # SUBSCRIBE
-# ============================================================
+# =========================================================
 
 class NewsletterSubscribeView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [
+        AllowAny
+    ]
 
-    def post(self, request):
+    def post(
+        self,
+        request,
+    ):
         email = normalize_email(
             request.data.get(
                 "email",
@@ -626,14 +749,15 @@ class NewsletterSubscribeView(APIView):
         if not email:
             return Response(
                 {
-                    "error": "Email is required."
+                    "error": (
+                        "Email is required."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             validate_email(email)
-
         except ValidationError:
             return Response(
                 {
@@ -645,7 +769,8 @@ class NewsletterSubscribeView(APIView):
             )
 
         subscriber, created = (
-            NewsletterSubscriber.objects.get_or_create(
+            NewsletterSubscriber.objects
+            .get_or_create(
                 email=email,
                 defaults={
                     "first_name": first_name,
@@ -671,10 +796,16 @@ class NewsletterSubscribeView(APIView):
             subscriber.save()
 
         try:
-            brevo_result = create_brevo_contact(
-                email=email,
-                first_name=subscriber.first_name,
-                last_name=subscriber.last_name,
+            brevo_result = (
+                create_brevo_contact(
+                    email=email,
+                    first_name=(
+                        subscriber.first_name
+                    ),
+                    last_name=(
+                        subscriber.last_name
+                    ),
+                )
             )
 
             if brevo_result.get("id"):
@@ -699,8 +830,9 @@ class NewsletterSubscribeView(APIView):
         return Response(
             {
                 "message": (
-                    "You have successfully subscribed "
-                    "to the ORENTEMIST newsletter."
+                    "You have successfully "
+                    "subscribed to the "
+                    "ORENTEMIST newsletter."
                 ),
                 "subscriber": (
                     NewsletterSubscriberSerializer(
@@ -712,14 +844,19 @@ class NewsletterSubscribeView(APIView):
         )
 
 
-# ============================================================
+# =========================================================
 # UNSUBSCRIBE
-# ============================================================
+# =========================================================
 
 class NewsletterUnsubscribeView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [
+        AllowAny
+    ]
 
-    def post(self, request):
+    def post(
+        self,
+        request,
+    ):
         email = normalize_email(
             request.data.get(
                 "email",
@@ -730,7 +867,9 @@ class NewsletterUnsubscribeView(APIView):
         if not email:
             return Response(
                 {
-                    "error": "Email is required."
+                    "error": (
+                        "Email is required."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -757,7 +896,6 @@ class NewsletterUnsubscribeView(APIView):
             unsubscribe_brevo_contact(
                 email
             )
-
         except Exception as error:
             print(
                 "BREVO UNSUBSCRIBE ERROR:",
@@ -775,23 +913,30 @@ class NewsletterUnsubscribeView(APIView):
         )
 
 
-# ============================================================
+# =========================================================
 # SUBSCRIBERS
-# ============================================================
+# =========================================================
 
 class NewsletterSubscribersView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def get(self, request):
+    def get(
+        self,
+        request,
+    ):
         subscribers = (
             NewsletterSubscriber.objects
             .all()
             .order_by("-created_at")
         )
 
-        serializer = NewsletterSubscriberSerializer(
-            subscribers,
-            many=True,
+        serializer = (
+            NewsletterSubscriberSerializer(
+                subscribers,
+                many=True,
+            )
         )
 
         return Response(
@@ -800,14 +945,71 @@ class NewsletterSubscribersView(APIView):
         )
 
 
-# ============================================================
+# =========================================================
+# AUDIENCE PREVIEW
+# =========================================================
+
+class NewsletterAudiencePreviewView(APIView):
+    permission_classes = [
+        IsAdminUser
+    ]
+
+    def post(
+        self,
+        request,
+    ):
+        try:
+            audience = calculate_audience(
+                request.data
+            )
+
+            return Response(
+                {
+                    "recipient_count": (
+                        audience[
+                            "recipient_count"
+                        ]
+                    ),
+                    "counts": (
+                        audience["counts"]
+                    ),
+                    "excluded_count": (
+                        audience[
+                            "excluded_count"
+                        ]
+                    ),
+                    "audience_config": (
+                        audience[
+                            "audience_config"
+                        ]
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as error:
+            return Response(
+                {
+                    "error": str(error),
+                    "message": str(error),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+# =========================================================
 # TEMPLATES
-# ============================================================
+# =========================================================
 
 class NewsletterTemplatesView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def get(self, request):
+    def get(
+        self,
+        request,
+    ):
         return Response(
             {
                 "templates": []
@@ -816,94 +1018,23 @@ class NewsletterTemplatesView(APIView):
         )
 
 
-# ============================================================
-# AUDIENCE PREVIEW
-# ============================================================
-
-class NewsletterAudiencePreviewView(APIView):
-    permission_classes = [IsAdminUser]
-
-    def post(self, request):
-        include = request.data.get(
-            "include",
-            [],
-        )
-
-        if not isinstance(
-            include,
-            list,
-        ):
-            include = [include]
-
-        selected_subscriber_ids = (
-            request.data.get(
-                "selected_subscriber_ids",
-                [],
-            )
-        )
-
-        exclude_emails = (
-            request.data.get(
-                "exclude_emails",
-                [],
-            )
-        )
-
-        allowed_groups = {
-            "subscribers",
-            "users",
-            "customers",
-            "everyone",
-            "selected",
-        }
-
-        include = [
-            item
-            for item in include
-            if item in allowed_groups
-        ]
-
-        if not include:
-            include = [
-                "subscribers"
-            ]
-
-        audience = get_audience_emails(
-            include=include,
-            selected_subscriber_ids=(
-                selected_subscriber_ids
-            ),
-            exclude_emails=exclude_emails,
-        )
-
-        return Response(
-            {
-                "recipient_count": len(
-                    audience["emails"]
-                ),
-
-                "counts": (
-                    audience["available"]
-                ),
-
-                "excluded_count": (
-                    audience["excluded_count"]
-                ),
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
-# ============================================================
+# =========================================================
 # CAMPAIGNS
-# ============================================================
+# =========================================================
 
 class NewsletterCampaignsView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def get(self, request):
+    def get(
+        self,
+        request,
+    ):
         try:
-            brevo_data = get_brevo_campaigns()
+            brevo_data = (
+                get_brevo_campaigns()
+            )
 
             brevo_campaigns = (
                 brevo_data.get(
@@ -974,9 +1105,7 @@ class NewsletterCampaignsView(APIView):
                     {
                         "id": campaign_id,
 
-                        "brevo_campaign_id": (
-                            campaign_id
-                        ),
+                        "brevo_campaign_id": campaign_id,
 
                         "name": (
                             campaign.get(
@@ -1014,12 +1143,6 @@ class NewsletterCampaignsView(APIView):
                             )
                         ),
 
-                        "template_id": (
-                            local.template_id
-                            if local
-                            else None
-                        ),
-
                         "sender_name": (
                             sender_data.get(
                                 "name",
@@ -1047,12 +1170,22 @@ class NewsletterCampaignsView(APIView):
                         "recipients": (
                             local.recipients
                             if local
-                            else (
-                                recipients_data.get(
-                                    "recipients",
-                                    0,
-                                )
+                            else recipients_data.get(
+                                "recipients",
+                                0,
                             )
+                        ),
+
+                        "recipient_type": (
+                            local.recipient_type
+                            if local
+                            else "subscribers"
+                        ),
+
+                        "audience_config": (
+                            local.audience_config
+                            if local
+                            else {}
                         ),
 
                         "status": (
@@ -1154,18 +1287,6 @@ class NewsletterCampaignsView(APIView):
                             if local
                             else ""
                         ),
-
-                        "recipient_type": (
-                            local.recipient_type
-                            if local
-                            else "subscribers"
-                        ),
-
-                        "audience_config": (
-                            local.audience_config
-                            if local
-                            else {}
-                        ),
                     }
                 )
 
@@ -1191,10 +1312,6 @@ class NewsletterCampaignsView(APIView):
 
                         "preview": local.preview,
 
-                        "template_id": (
-                            local.template_id
-                        ),
-
                         "sender_name": (
                             local.sender_name
                         ),
@@ -1205,6 +1322,14 @@ class NewsletterCampaignsView(APIView):
 
                         "recipients": (
                             local.recipients
+                        ),
+
+                        "recipient_type": (
+                            local.recipient_type
+                        ),
+
+                        "audience_config": (
+                            local.audience_config
                         ),
 
                         "status": local.status,
@@ -1256,14 +1381,6 @@ class NewsletterCampaignsView(APIView):
                         "button_url": (
                             local.button_url
                         ),
-
-                        "recipient_type": (
-                            local.recipient_type
-                        ),
-
-                        "audience_config": (
-                            local.audience_config
-                        ),
                     }
                 )
 
@@ -1277,7 +1394,10 @@ class NewsletterCampaignsView(APIView):
                 error
             )
 
-    def post(self, request):
+    def post(
+        self,
+        request,
+    ):
         name = (
             request.data.get(
                 "name",
@@ -1356,67 +1476,6 @@ class NewsletterCampaignsView(APIView):
             or settings.BREVO_DEFAULT_SENDER_EMAIL
         ).strip()
 
-        recipient_type = (
-            request.data.get(
-                "recipient_type",
-                "subscribers",
-            )
-            .strip()
-            .lower()
-        )
-
-        include = request.data.get(
-            "include",
-            [],
-        )
-
-        if not isinstance(
-            include,
-            list,
-        ):
-            include = [include]
-
-        exclude_emails = (
-            request.data.get(
-                "exclude_emails",
-                [],
-            )
-        )
-
-        selected_subscriber_ids = (
-            request.data.get(
-                "selected_subscriber_ids",
-                [],
-            )
-        )
-
-        allowed_types = {
-            "subscribers": [
-                "subscribers"
-            ],
-            "users": [
-                "users"
-            ],
-            "customers": [
-                "customers"
-            ],
-            "both": [
-                "subscribers",
-                "customers",
-            ],
-            "everyone": [
-                "everyone"
-            ],
-            "selected": [
-                "selected"
-            ],
-        }
-
-        if recipient_type in allowed_types:
-            include = allowed_types[
-                recipient_type
-            ]
-
         if not name:
             return Response(
                 {
@@ -1467,47 +1526,162 @@ class NewsletterCampaignsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        audience = get_audience_emails(
-            include=include,
-            selected_subscriber_ids=(
-                selected_subscriber_ids
-            ),
-            exclude_emails=exclude_emails,
+        audience = calculate_audience(
+            request.data
         )
 
-        recipient_emails = sorted(
-            audience["emails"]
+        recipient_emails = (
+            audience[
+                "recipient_emails"
+            ]
         )
 
         if not recipient_emails:
             return Response(
                 {
                     "error": (
-                        "No eligible newsletter recipients "
-                        "were found for this audience."
-                    )
+                        "No eligible newsletter "
+                        "recipients were found "
+                        "for this audience."
+                    ),
+                    "counts": (
+                        audience["counts"]
+                    ),
+                    "audience_config": (
+                        audience[
+                            "audience_config"
+                        ]
+                    ),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        html_content = build_newsletter_html(
-            hero_image=hero_image,
-            heading=heading,
-            body=body,
-            button_text=button_text,
-            button_url=button_url,
+        html_content = (
+            build_newsletter_html(
+                hero_image=hero_image,
+                heading=heading,
+                body=body,
+                button_text=button_text,
+                button_url=button_url,
+            )
         )
 
-        brevo_list_id = None
+        temp_list_id = None
         brevo_campaign_id = None
 
         try:
-            brevo_list_id = (
-                create_campaign_recipient_list(
-                    campaign_name=name,
-                    emails=recipient_emails,
+            # Use the existing ORENTEMIST list's
+            # folder as the parent for campaign lists.
+            base_list_id = int(
+                settings.BREVO_LIST_ID
+            )
+
+            base_list = (
+                get_brevo_list(
+                    base_list_id
                 )
             )
+
+            folder_id = (
+                base_list.get(
+                    "folderId"
+                )
+            )
+
+            if not folder_id:
+                raise RuntimeError(
+                    "Brevo could not determine "
+                    "the folder for BREVO_LIST_ID."
+                )
+
+            list_name = (
+                f"ORENTEMIST Campaign - "
+                f"{name[:150]}"
+            )
+
+            temp_list = (
+                create_brevo_list(
+                    name=list_name,
+                    folder_id=folder_id,
+                )
+            )
+
+            temp_list_id = (
+                temp_list.get("id")
+            )
+
+            if not temp_list_id:
+                raise RuntimeError(
+                    "Brevo did not return a "
+                    "recipient list ID."
+                )
+
+            # The selected users/customers may not
+            # already exist in Brevo.
+            #
+            # First try to add them to the list.
+            add_result = (
+                add_brevo_contacts_to_list(
+                    temp_list_id,
+                    recipient_emails,
+                )
+            )
+
+            failed_emails = set(
+                normalize_email_set(
+                    add_result.get(
+                        "failure",
+                        [],
+                    )
+                )
+            )
+
+            # If an address doesn't exist in Brevo,
+            # create it directly in the campaign list.
+            for email in failed_emails:
+                try:
+                    create_brevo_contact(
+                        email=email,
+                        first_name="",
+                        last_name="",
+                    )
+
+                    add_brevo_contacts_to_list(
+                        temp_list_id,
+                        [email],
+                    )
+
+                except Exception:
+                    pass
+
+            # Verify that every requested recipient was
+            # successfully added.
+            final_add = (
+                add_brevo_contacts_to_list(
+                    temp_list_id,
+                    recipient_emails,
+                )
+            )
+
+            final_failures = (
+                normalize_email_set(
+                    final_add.get(
+                        "failure",
+                        [],
+                    )
+                )
+            )
+
+            if final_failures:
+                missing = sorted(
+                    final_failures
+                )
+
+                raise RuntimeError(
+                    "Brevo could not add "
+                    f"{len(missing)} recipient(s) "
+                    "to the campaign list."
+                )
 
             campaign_data = (
                 create_brevo_html_campaign(
@@ -1518,39 +1692,36 @@ class NewsletterCampaignsView(APIView):
                     sender_name=sender_name,
                     sender_email=sender_email,
                     list_ids=[
-                        brevo_list_id
+                        temp_list_id
                     ],
                 )
             )
 
             brevo_campaign_id = (
-                campaign_data.get(
-                    "id"
-                )
+                campaign_data.get("id")
             )
 
             if not brevo_campaign_id:
                 raise RuntimeError(
-                    "Brevo did not return a campaign ID."
+                    "Brevo did not return "
+                    "a campaign ID."
                 )
 
-            audience_config = {
-                "include": include,
-                "exclude": [],
-                "exclude_emails": (
-                    sorted(
-                        clean_email_set(
-                            exclude_emails
-                        )
-                    )
-                ),
-                "selected_subscriber_ids": (
-                    selected_subscriber_ids
-                ),
-                "brevo_list_id": (
-                    brevo_list_id
-                ),
-            }
+            saved_audience_config = (
+                audience[
+                    "audience_config"
+                ].copy()
+            )
+
+            saved_audience_config[
+                "brevo_list_id"
+            ] = temp_list_id
+
+            saved_audience_config[
+                "recipient_count"
+            ] = len(
+                recipient_emails
+            )
 
             local_campaign = (
                 NewsletterCampaign.objects.create(
@@ -1587,11 +1758,15 @@ class NewsletterCampaignsView(APIView):
                     button_url=button_url,
 
                     recipient_type=(
-                        recipient_type
+                        audience[
+                            "audience_config"
+                        ][
+                            "recipient_type"
+                        ]
                     ),
 
                     audience_config=(
-                        audience_config
+                        saved_audience_config
                     ),
 
                     recipient_emails=(
@@ -1603,7 +1778,14 @@ class NewsletterCampaignsView(APIView):
             return Response(
                 {
                     "message": (
-                        "Newsletter draft created successfully."
+                        "Newsletter draft "
+                        "created successfully."
+                    ),
+
+                    "campaign": (
+                        NewsletterCampaignSerializer(
+                            local_campaign
+                        ).data
                     ),
 
                     "id": (
@@ -1614,31 +1796,30 @@ class NewsletterCampaignsView(APIView):
                         brevo_campaign_id
                     ),
 
-                    "html_content": (
-                        html_content
-                    ),
-
                     "recipient_count": (
                         len(
                             recipient_emails
                         )
                     ),
 
-                    "campaign": (
-                        NewsletterCampaignSerializer(
-                            local_campaign
-                        ).data
+                    "audience": audience,
+
+                    "html_content": (
+                        html_content
                     ),
                 },
                 status=status.HTTP_201_CREATED,
             )
 
         except Exception as error:
-
-            if brevo_list_id:
+            # Clean up a list if campaign creation failed.
+            if (
+                temp_list_id
+                and not brevo_campaign_id
+            ):
                 try:
                     delete_brevo_list(
-                        brevo_list_id
+                        temp_list_id
                     )
                 except Exception:
                     pass
@@ -1648,14 +1829,22 @@ class NewsletterCampaignsView(APIView):
             )
 
 
-# ============================================================
-# SEND CAMPAIGN
-# ============================================================
+# =========================================================
+# SEND DRAFT
+# =========================================================
 
-class NewsletterCampaignSendDraftView(APIView):
-    permission_classes = [IsAdminUser]
+class NewsletterCampaignSendDraftView(
+    APIView
+):
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def post(self, request, pk):
+    def post(
+        self,
+        request,
+        pk,
+    ):
         campaign = (
             NewsletterCampaign.objects
             .filter(
@@ -1668,7 +1857,8 @@ class NewsletterCampaignSendDraftView(APIView):
             return Response(
                 {
                     "error": (
-                        "Newsletter campaign was not found."
+                        "Newsletter campaign "
+                        "was not found."
                     )
                 },
                 status=status.HTTP_404_NOT_FOUND,
@@ -1682,7 +1872,8 @@ class NewsletterCampaignSendDraftView(APIView):
             return Response(
                 {
                     "error": (
-                        "This newsletter has already been sent."
+                        "This newsletter "
+                        "has already been sent."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1697,7 +1888,8 @@ class NewsletterCampaignSendDraftView(APIView):
             return Response(
                 {
                     "error": (
-                        "This campaign has no saved recipients."
+                        "This campaign has "
+                        "no saved recipients."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1708,26 +1900,60 @@ class NewsletterCampaignSendDraftView(APIView):
             or {}
         )
 
-        brevo_list_id = (
+        temp_list_id = (
             audience_config.get(
                 "brevo_list_id"
             )
         )
 
-        if not brevo_list_id:
+        if not temp_list_id:
             return Response(
                 {
                     "error": (
-                        "This campaign does not have "
-                        "a recipient list."
+                        "This campaign does "
+                        "not have a recipient list."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            result = send_brevo_draft_campaign(
-                pk
+            # Rebuild the campaign list immediately
+            # before sending so manually unsubscribed
+            # newsletter contacts are not sent a campaign.
+            #
+            # For campaigns whose audience is users/customers,
+            # the saved audience remains the source of truth.
+            remove_all_brevo_contacts_from_list(
+                temp_list_id
+            )
+
+            add_result = (
+                add_brevo_contacts_to_list(
+                    temp_list_id,
+                    recipient_emails,
+                )
+            )
+
+            failures = (
+                normalize_email_set(
+                    add_result.get(
+                        "failure",
+                        [],
+                    )
+                )
+            )
+
+            if failures:
+                raise RuntimeError(
+                    "Brevo could not prepare "
+                    "all campaign recipients."
+                )
+
+            result = (
+                send_brevo_draft_campaign(
+                    pk
+                )
             )
 
             campaign.recipients = len(
@@ -1761,6 +1987,12 @@ class NewsletterCampaignSendDraftView(APIView):
                         ).data
                     ),
 
+                    "recipient_count": (
+                        len(
+                            recipient_emails
+                        )
+                    ),
+
                     "brevo": result,
                 },
                 status=status.HTTP_200_OK,
@@ -1781,14 +2013,21 @@ class NewsletterCampaignSendDraftView(APIView):
             )
 
 
-# ============================================================
+# =========================================================
 # TEST EMAIL
-# ============================================================
+# =========================================================
 
-class NewsletterCampaignTestView(APIView):
-    permission_classes = [IsAdminUser]
+class NewsletterCampaignTestView(
+    APIView
+):
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def post(self, request):
+    def post(
+        self,
+        request,
+    ):
         email = normalize_email(
             request.data.get(
                 "email",
@@ -1810,19 +2049,6 @@ class NewsletterCampaignTestView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            validate_email(email)
-
-        except ValidationError:
-            return Response(
-                {
-                    "error": (
-                        "Enter a valid test email address."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         if not campaign_id:
             return Response(
                 {
@@ -1837,7 +2063,6 @@ class NewsletterCampaignTestView(APIView):
             campaign_id = int(
                 campaign_id
             )
-
         except (
             TypeError,
             ValueError,
@@ -1863,7 +2088,8 @@ class NewsletterCampaignTestView(APIView):
             return Response(
                 {
                     "error": (
-                        "Newsletter campaign was not found."
+                        "Newsletter campaign "
+                        "was not found."
                     )
                 },
                 status=status.HTTP_404_NOT_FOUND,
@@ -1878,15 +2104,13 @@ class NewsletterCampaignTestView(APIView):
             return Response(
                 {
                     "message": (
-                        "Test newsletter sent successfully."
+                        "Test newsletter "
+                        "sent successfully."
                     ),
-
                     "email": email,
-
                     "campaign_id": (
                         campaign_id
                     ),
-
                     "brevo": result,
                 },
                 status=status.HTTP_200_OK,
@@ -1898,14 +2122,22 @@ class NewsletterCampaignTestView(APIView):
             )
 
 
-# ============================================================
+# =========================================================
 # REFRESH CAMPAIGN
-# ============================================================
+# =========================================================
 
-class NewsletterCampaignRefreshView(APIView):
-    permission_classes = [IsAdminUser]
+class NewsletterCampaignRefreshView(
+    APIView
+):
+    permission_classes = [
+        IsAdminUser
+    ]
 
-    def post(self, request, pk):
+    def post(
+        self,
+        request,
+        pk,
+    ):
         campaign = (
             NewsletterCampaign.objects
             .filter(
@@ -1927,43 +2159,20 @@ class NewsletterCampaignRefreshView(APIView):
                 or {}
             )
 
-            global_stats = (
-                statistics.get(
-                    "globalStats",
-                    {},
-                )
-                or {}
-            )
-
-            open_rate = (
-                global_stats.get(
-                    "openRate"
-                )
-                or global_stats.get(
-                    "opensRate"
-                )
-                or 0
-            )
-
-            click_rate = (
-                global_stats.get(
-                    "clickRate"
-                )
-                or 0
-            )
-
             if campaign:
-                campaign.status = data.get(
-                    "status",
-                    campaign.status,
+                campaign.status = (
+                    data.get(
+                        "status",
+                        campaign.status,
+                    )
                 )
 
                 campaign.opened_rate = (
-                    f"{open_rate}%"
+                    f"{statistics.get('openRate', 0)}%"
                 )
 
                 campaign.click_rate = (
-                    f"{click_rate}%"
+                    f"{statistics.get('clickRate', 0)}%"
                 )
 
                 campaign.save(

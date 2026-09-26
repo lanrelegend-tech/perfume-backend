@@ -62,63 +62,9 @@ def brevo_request(
         return {}
 
 
-# ============================================================
-# TEMPLATES
-# ============================================================
-
-def get_brevo_templates():
-    return brevo_request(
-        "GET",
-        "/smtp/templates",
-        params={
-            "templateStatus": True,
-            "limit": 1000,
-            "offset": 0,
-            "sort": "desc",
-        },
-    )
-
-
-# ============================================================
-# CAMPAIGNS
-# ============================================================
-
-def get_brevo_campaigns():
-    return brevo_request(
-        "GET",
-        "/emailCampaigns",
-        params={
-            "limit": 100,
-            "offset": 0,
-            "sort": "desc",
-        },
-    )
-
-
-def get_brevo_campaign(campaign_id):
-    return brevo_request(
-        "GET",
-        f"/emailCampaigns/{campaign_id}",
-    )
-
-
-def get_brevo_draft_campaigns():
-    return brevo_request(
-        "GET",
-        "/emailCampaigns",
-        params={
-            "status": "draft",
-            "type": "classic",
-            "limit": 100,
-            "offset": 0,
-            "sort": "desc",
-        },
-    )
-
-
-# ============================================================
+# ---------------------------------------------------------
 # CONTACTS
-# ============================================================
+# ---------------------------------------------------------
 
 def create_brevo_contact(
     email,
@@ -152,7 +98,9 @@ def create_brevo_contact(
     )
 
 
-def unsubscribe_brevo_contact(email):
+def unsubscribe_brevo_contact(
+    email,
+):
     list_id = settings.BREVO_LIST_ID
 
     if not list_id:
@@ -171,204 +119,13 @@ def unsubscribe_brevo_contact(email):
     )
 
 
-# ============================================================
-# CAMPAIGN CREATION
-# ============================================================
+# ---------------------------------------------------------
+# BREVO LISTS
+# ---------------------------------------------------------
 
-def create_brevo_campaign(
-    name,
-    subject,
-    preview,
-    template_id,
-    sender_name,
-    sender_email,
-    list_ids=None,
-    segment_ids=None,
+def get_brevo_list(
+    list_id,
 ):
-    """
-    Create a Brevo campaign using explicit recipient lists.
-
-    list_ids:
-        Example: [3]
-
-    segment_ids:
-        Example: [12]
-
-    If list_ids/segment_ids are not supplied,
-    the configured BREVO_LIST_ID is used.
-    """
-
-    if list_ids is None:
-        configured_list_id = settings.BREVO_LIST_ID
-
-        if not configured_list_id:
-            raise RuntimeError(
-                "BREVO_LIST_ID is not configured."
-            )
-
-        list_ids = [
-            int(configured_list_id)
-        ]
-
-    recipients = {}
-
-    if list_ids:
-        recipients["listIds"] = [
-            int(item)
-            for item in list_ids
-        ]
-
-    if segment_ids:
-        recipients["segmentIds"] = [
-            int(item)
-            for item in segment_ids
-        ]
-
-    if not recipients:
-        raise RuntimeError(
-            "No Brevo recipients were provided."
-        )
-
-    data = {
-        "name": name,
-        "subject": subject,
-        "previewText": preview,
-        "sender": {
-            "name": sender_name,
-            "email": sender_email,
-        },
-        "templateId": int(template_id),
-        "recipients": recipients,
-        "type": "classic",
-    }
-
-    return brevo_request(
-        "POST",
-        "/emailCampaigns",
-        data=data,
-    )
-
-
-def create_brevo_html_campaign(
-    name,
-    subject,
-    preview,
-    html_content,
-    sender_name,
-    sender_email,
-    list_ids=None,
-    segment_ids=None,
-):
-    """
-    Create an HTML Brevo campaign.
-
-    Explicit list_ids/segment_ids can be supplied by the
-    audience engine.
-
-    If no recipient lists are supplied, the configured
-    BREVO_LIST_ID is used as a fallback.
-    """
-
-    if list_ids is None:
-        configured_list_id = settings.BREVO_LIST_ID
-
-        if not configured_list_id:
-            raise RuntimeError(
-                "BREVO_LIST_ID is not configured."
-            )
-
-        list_ids = [
-            int(configured_list_id)
-        ]
-
-    recipients = {}
-
-    if list_ids:
-        recipients["listIds"] = [
-            int(item)
-            for item in list_ids
-        ]
-
-    if segment_ids:
-        recipients["segmentIds"] = [
-            int(item)
-            for item in segment_ids
-        ]
-
-    if not recipients:
-        raise RuntimeError(
-            "No Brevo recipients were provided."
-        )
-
-    data = {
-        "name": name,
-        "subject": subject,
-        "previewText": preview,
-        "sender": {
-            "name": sender_name,
-            "email": sender_email,
-        },
-        "recipients": recipients,
-        "htmlContent": html_content,
-        "type": "classic",
-    }
-
-    return brevo_request(
-        "POST",
-        "/emailCampaigns",
-        data=data,
-    )
-
-
-# ============================================================
-# TEST EMAIL
-# ============================================================
-
-def send_brevo_test(
-    campaign_id,
-    email,
-):
-    return brevo_request(
-        "POST",
-        f"/emailCampaigns/{campaign_id}/sendTest",
-        data={
-            "emailTo": [
-                email
-            ],
-        },
-    )
-
-
-# ============================================================
-# SEND
-# ============================================================
-
-def send_brevo_campaign(campaign_id):
-    return brevo_request(
-        "POST",
-        f"/emailCampaigns/{campaign_id}/sendNow",
-    )
-
-
-def send_brevo_draft_campaign(campaign_id):
-    return brevo_request(
-        "POST",
-        f"/emailCampaigns/{campaign_id}/sendNow",
-    )
-
-
-# ============================================================
-# DELETE
-# ============================================================
-
-def delete_brevo_campaign(campaign_id):
-    return brevo_request(
-        "DELETE",
-        f"/emailCampaigns/{campaign_id}",
-    )
-
-
-def get_brevo_list(list_id):
     return brevo_request(
         "GET",
         f"/contacts/lists/{int(list_id)}",
@@ -393,27 +150,69 @@ def add_brevo_contacts_to_list(
     list_id,
     emails,
 ):
-    clean_emails = [
+    emails = [
         str(email).strip().lower()
         for email in emails
         if email
     ]
 
-    clean_emails = list(
-        dict.fromkeys(clean_emails)
-    )
+    emails = list(dict.fromkeys(emails))
 
-    if not clean_emails:
+    if not emails:
         return {
             "success": [],
             "failure": [],
         }
 
+    all_success = []
+    all_failure = []
+
+    # Keep batches reasonably sized.
+    for index in range(
+        0,
+        len(emails),
+        500,
+    ):
+        batch = emails[
+            index:index + 500
+        ]
+
+        result = brevo_request(
+            "POST",
+            f"/contacts/lists/{int(list_id)}/contacts/add",
+            data={
+                "emails": batch,
+            },
+        )
+
+        all_success.extend(
+            result.get(
+                "success",
+                [],
+            )
+        )
+
+        all_failure.extend(
+            result.get(
+                "failure",
+                [],
+            )
+        )
+
+    return {
+        "success": all_success,
+        "failure": all_failure,
+    }
+
+
+def remove_all_brevo_contacts_from_list(
+    list_id,
+):
     return brevo_request(
         "POST",
-        f"/contacts/lists/{int(list_id)}/contacts/add",
+        f"/contacts/lists/{int(list_id)}/contacts/remove",
         data={
-            "emails": clean_emails,
+            "all": True,
         },
     )
 
@@ -427,6 +226,122 @@ def delete_brevo_list(
     )
 
 
+# ---------------------------------------------------------
+# CAMPAIGNS
+# ---------------------------------------------------------
+
+def get_brevo_templates():
+    return brevo_request(
+        "GET",
+        "/smtp/templates",
+        params={
+            "templateStatus": True,
+            "limit": 1000,
+            "offset": 0,
+            "sort": "desc",
+        },
+    )
+
+
+def get_brevo_campaigns():
+    return brevo_request(
+        "GET",
+        "/emailCampaigns",
+        params={
+            "limit": 100,
+            "offset": 0,
+            "sort": "desc",
+        },
+    )
+
+
+def get_brevo_campaign(
+    campaign_id,
+):
+    return brevo_request(
+        "GET",
+        f"/emailCampaigns/{campaign_id}",
+    )
+
+
+def get_brevo_draft_campaigns():
+    return brevo_request(
+        "GET",
+        "/emailCampaigns",
+        params={
+            "status": "draft",
+            "type": "classic",
+            "limit": 100,
+            "offset": 0,
+            "sort": "desc",
+        },
+    )
+
+
+def create_brevo_campaign(
+    name,
+    subject,
+    preview,
+    html_content,
+    sender_name,
+    sender_email,
+    list_ids,
+):
+    if not list_ids:
+        raise RuntimeError(
+            "At least one Brevo recipient list is required."
+        )
+
+    data = {
+        "name": name,
+        "subject": subject,
+        "previewText": preview,
+        "sender": {
+            "name": sender_name,
+            "email": sender_email,
+        },
+        "recipients": {
+            "listIds": [
+                int(list_id)
+                for list_id in list_ids
+            ],
+        },
+        "htmlContent": html_content,
+        "type": "classic",
+    }
+
+    return brevo_request(
+        "POST",
+        "/emailCampaigns",
+        data=data,
+    )
+
+
+def create_brevo_html_campaign(
+    name,
+    subject,
+    preview,
+    html_content,
+    sender_name,
+    sender_email,
+    list_ids=None,
+):
+    if list_ids is None:
+        list_ids = [
+            int(settings.BREVO_LIST_ID)
+        ]
+
+    return create_brevo_campaign(
+        name=name,
+        subject=subject,
+        preview=preview,
+        html_content=html_content,
+        sender_name=sender_name,
+        sender_email=sender_email,
+        list_ids=list_ids,
+    )
+
+
 def update_brevo_campaign_recipients(
     campaign_id,
     list_ids,
@@ -437,9 +352,50 @@ def update_brevo_campaign_recipients(
         data={
             "recipients": {
                 "listIds": [
-                    int(item)
-                    for item in list_ids
+                    int(list_id)
+                    for list_id in list_ids
                 ],
             },
         },
+    )
+
+
+def send_brevo_test(
+    campaign_id,
+    email,
+):
+    return brevo_request(
+        "POST",
+        f"/emailCampaigns/{campaign_id}/sendTest",
+        data={
+            "emailTo": [
+                email
+            ],
+        },
+    )
+
+
+def send_brevo_campaign(
+    campaign_id,
+):
+    return brevo_request(
+        "POST",
+        f"/emailCampaigns/{campaign_id}/sendNow",
+    )
+
+
+def send_brevo_draft_campaign(
+    campaign_id,
+):
+    return send_brevo_campaign(
+        campaign_id
+    )
+
+
+def delete_brevo_campaign(
+    campaign_id,
+):
+    return brevo_request(
+        "DELETE",
+        f"/emailCampaigns/{campaign_id}",
     )
