@@ -231,21 +231,20 @@ def get_audience_config(
             include = [
                 "subscribers"
             ]
+# "both" means newsletter subscribers + paid customers.
+if "both" in include:
+    include = [
+        item
+        for item in include
+        if item != "both"
+    ]
 
-    # "both" means registered users + paid customers.
-    if "both" in include:
-        include = [
-            item
-            for item in include
-            if item != "both"
+    include.extend(
+        [
+            "subscribers",
+            "customers",
         ]
-
-        include.extend(
-            [
-                "users",
-                "customers",
-            ]
-        )
+    )
 
     # "everyone" already represents the complete
     # available audience, so don't combine it with
@@ -336,11 +335,12 @@ def calculate_audience(
         "customers": len(
             customer_emails
         ),
-
         "both": len(
-            user_emails |
-            customer_emails
+    subscriber_emails |
+    customer_emails
         ),
+
+
 
         "everyone": len(
             subscriber_emails |
