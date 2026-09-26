@@ -2012,7 +2012,6 @@ class NewsletterCampaignSendDraftView(
                 error
             )
 
-
 # =========================================================
 # TEST EMAIL
 # =========================================================
@@ -2035,9 +2034,79 @@ class NewsletterCampaignTestView(
             )
         )
 
-        campaign_id = request.data.get(
-            "campaign_id"
+        subject = (
+            request.data.get(
+                "subject",
+                "",
+            )
+            .strip()
         )
+
+        preview = (
+            request.data.get(
+                "preview",
+                "",
+            )
+            .strip()
+        )
+
+        hero_image = (
+            request.data.get(
+                "hero_image",
+                "",
+            )
+            .strip()
+        )
+
+        heading = (
+            request.data.get(
+                "heading",
+                "",
+            )
+            .strip()
+        )
+
+        body = (
+            request.data.get(
+                "body",
+                "",
+            )
+            .strip()
+        )
+
+        button_text = (
+            request.data.get(
+                "button_text",
+                "",
+            )
+            .strip()
+        )
+
+        button_url = (
+            request.data.get(
+                "button_url",
+                "",
+            )
+            .strip()
+        )
+
+        sender_name = (
+            request.data.get(
+                "sender_name"
+            )
+            or settings.BREVO_DEFAULT_SENDER_NAME
+        ).strip()
+
+        sender_email = (
+            request.data.get(
+                "sender_email"
+            )
+            or settings.BREVO_DEFAULT_SENDER_EMAIL
+        ).strip()
+
+        # -------------------------------------------------
+        # VALIDATION
+        # -------------------------------------------------
 
         if not email:
             return Response(
@@ -2049,56 +2118,121 @@ class NewsletterCampaignTestView(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not campaign_id:
+        try:
+            validate_email(email)
+        except ValidationError:
             return Response(
                 {
                     "error": (
-                        "Campaign ID is required."
+                        "Enter a valid test email address."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            campaign_id = int(
-                campaign_id
+        if not subject:
+            return Response(
+                {
+                    "error": (
+                        "Subject is required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        except (
-            TypeError,
-            ValueError,
+
+        if not heading:
+            return Response(
+                {
+                    "error": (
+                        "Heading is required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not body:
+            return Response(
+                {
+                    "error": (
+                        "Newsletter body is required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if (
+            button_text
+            and not button_url
         ):
             return Response(
                 {
                     "error": (
-                        "Invalid campaign ID."
+                        "Button URL is required "
+                        "when button text is provided."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        campaign = (
-            NewsletterCampaign.objects
-            .filter(
-                brevo_campaign_id=campaign_id
-            )
-            .first()
-        )
+        # -------------------------------------------------
+        # BUILD NEWSLETTER HTML
+        # -------------------------------------------------
 
-        if not campaign:
+        try:
+            html_content = build_newsletter_html(
+                hero_image=hero_image,
+                heading=heading,
+                body=body,
+                button_text=button_text,
+                button_url=button_url,
+            )
+
+            # Add inbox preview text when provided.
+            if preview:
+                safe_preview = escape(
+                    preview
+                )
+
+                html_content = html_content.replace(
+                    "<body",
+                    (
+                        '<div style="display:none;'
+                        'max-height:0;'
+                        'overflow:hidden;'
+                        'opacity:0;'
+                        'color:transparent;'
+                        'font-size:1px;'
+                        'line-height:1px;">'
+                        f"{safe_preview}"
+                        "</div>"
+                        "<body"
+                    ),
+                    1,
+                )
+
+        except Exception as error:
             return Response(
                 {
                     "error": (
-                        "Newsletter campaign "
-                        "was not found."
-                    )
+                        "Unable to build "
+                        "test newsletter."
+                    ),
+                    "message": str(error),
                 },
-                status=status.HTTP_404_NOT_FOUND,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+        # -------------------------------------------------
+        # SEND DIRECTLY THROUGH BREVO TRANSACTIONAL EMAIL
+        # -------------------------------------------------
 
         try:
             result = send_brevo_test(
-                campaign_id,
-                email,
+                email=email,
+                subject=subject,
+                html_content=html_content,
+                sender_name=sender_name,
+                sender_email=sender_email,
             )
 
             return Response(
@@ -2108,9 +2242,6 @@ class NewsletterCampaignTestView(
                         "sent successfully."
                     ),
                     "email": email,
-                    "campaign_id": (
-                        campaign_id
-                    ),
                     "brevo": result,
                 },
                 status=status.HTTP_200_OK,

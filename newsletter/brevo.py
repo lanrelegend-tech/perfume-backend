@@ -359,20 +359,32 @@ def update_brevo_campaign_recipients(
         },
     )
 
-
 def send_brevo_test(
-    campaign_id,
     email,
+    subject,
+    html_content,
+    sender_name,
+    sender_email,
 ):
     return brevo_request(
         "POST",
-        f"/emailCampaigns/{campaign_id}/sendTest",
+        "/smtp/email",
         data={
-            "emailTo": [
-                email
+            "sender": {
+                "name": sender_name,
+                "email": sender_email,
+            },
+            "to": [
+                {
+                    "email": email,
+                }
             ],
+            "subject": subject,
+            "htmlContent": html_content,
         },
     )
+
+
 
 
 def send_brevo_campaign(
