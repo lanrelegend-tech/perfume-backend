@@ -31,6 +31,16 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
+BREVO_LIST_ID = os.getenv("BREVO_LIST_ID", "")
+BREVO_DEFAULT_SENDER_NAME = os.getenv(
+    "BREVO_DEFAULT_SENDER_NAME",
+    "ORENTEMIST",
+)
+BREVO_DEFAULT_SENDER_EMAIL = os.getenv(
+    "BREVO_DEFAULT_SENDER_EMAIL",
+    "hello@orentemist.online",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv(
@@ -73,6 +83,7 @@ INSTALLED_APPS = [
     "notifications",
      "cloudinary",
      "cloudinary_storage",
+     "newsletter",
     
 ]
 
