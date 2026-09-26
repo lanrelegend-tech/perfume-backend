@@ -177,20 +177,10 @@ def normalize_audience_list(
         if str(item).strip()
     ]
 
-
-def get_audience_config(
-    data,
-):
-    recipient_type = (
-        str(
-            data.get(
-                "recipient_type",
-                "",
-            )
-        )
-        .strip()
-        .lower()
-    )
+def get_audience_config(data):
+    recipient_type = str(
+        data.get("recipient_type") or ""
+    ).strip().lower()
 
     include = normalize_audience_list(
         data.get("include")
@@ -201,50 +191,33 @@ def get_audience_config(
     )
 
     exclude_emails = normalize_email_set(
-        data.get(
-            "exclude_emails",
-            [],
-        )
-        or []
+        data.get("exclude_emails") or []
     )
 
-    selected_ids = (
-        data.get(
-            "selected_subscriber_ids",
-            [],
-        )
-        or data.get(
-            "recipient_ids",
-            [],
-        )
-        or []
-    )
+    selected_ids = data.get(
+        "selected_subscriber_ids"
+    ) or []
 
-    # Frontend sends recipient_type, so use it
-    # when include is missing.
     if not include:
         if recipient_type:
-            include = [
-                recipient_type
-            ]
+            include = [recipient_type]
         else:
-            include = [
-                "subscribers"
-            ]
-# "both" means newsletter subscribers + paid customers.
-if "both" in include:
-    include = [
-        item
-        for item in include
-        if item != "both"
-    ]
+            include = ["subscribers"]
 
-    include.extend(
-        [
-            "subscribers",
-            "customers",
+    # "both" means newsletter subscribers + paid customers.
+    if "both" in include:
+        include = [
+            item
+            for item in include
+            if item != "both"
         ]
-    )
+
+        include.extend(
+            [
+                "subscribers",
+                "customers",
+            ]
+        )
 
     # "everyone" already represents the complete
     # available audience, so don't combine it with
@@ -294,8 +267,6 @@ if "both" in include:
             for value in selected_ids
         ],
     }
-
-
 def calculate_audience(
     data,
 ):
