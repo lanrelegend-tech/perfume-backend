@@ -243,155 +243,212 @@ def send_orentemist_email(
 
                 </div>
 
+<!-- =================================================
+     PREMIUM BRAND FOOTER
+================================================= -->
 
-                <!-- =================================================
-                     BRAND FOOTER
-                ================================================== -->
+<div style="
+    background:#111111;
+    padding:42px 28px 30px;
+    text-align:center;
+">
 
-                <div style="
-                    padding: 32px 25px;
-                    background: #faf9f6;
-                    border-top: 1px solid #eeeeee;
-                    text-align: center;
-                ">
+    <!-- BRAND -->
 
-                    <p style="
-                        margin: 0 0 15px;
-                        color: #111111;
-                        font-size: 13px;
-                        font-weight: 700;
-                        letter-spacing: 2px;
-                    ">
-                        ORENTEMIST
-                    </p>
+    <div style="
+        font-family:Arial,Helvetica,sans-serif;
+        font-size:22px;
+        font-weight:700;
+        letter-spacing:6px;
+        color:#ffffff;
+    ">
+        ORENTEMIST
+    </div>
 
-                    <p style="
-                        margin: 0 0 18px;
-                        color: #777777;
-                        font-size: 11px;
-                        line-height: 1.8;
-                    ">
-                        The Art of Fragrance
-                        <br>
-                        Crafted for those who leave an impression.
-                    </p>
-
-                    <p style="
-                        margin: 0 0 8px;
-                        color: #555555;
-                        font-size: 11px;
-                        line-height: 1.8;
-                    ">
-                        <strong>Visit Us</strong>
-                        <br>
-                        22 Oyun, Ilorin, Kwara State, Nigeria
-                    </p>
-
-                    <p style="
-                        margin: 0 0 8px;
-                        color: #555555;
-                        font-size: 11px;
-                        line-height: 1.8;
-                    ">
-                        <strong>Call / WhatsApp</strong>
-                        <br>
-                        09153242202
-                    </p>
-
-                    <p style="
-                        margin: 0 0 18px;
-                        color: #555555;
-                        font-size: 11px;
-                        line-height: 1.8;
-                    ">
-                        <strong>Email</strong>
-                        <br>
-                        lanrelegend@gmail.com
-                    </p>
+    <div style="
+        margin-top:9px;
+        color:#aaa7a0;
+        font-size:9px;
+        font-weight:600;
+        letter-spacing:3px;
+        text-transform:uppercase;
+    ">
+        The Art of Fragrance
+    </div>
 
 
-                    <!-- SOCIAL MEDIA -->
+    <!-- DIVIDER -->
 
-                    <p style="
-                        margin: 18px 0 0;
-                        color: #999999;
-                        font-size: 10px;
-                        letter-spacing: 1px;
-                    ">
-                        FOLLOW ORENTEMIST
-                    </p>
-
-                    <p style="
-                        margin: 9px 0 0;
-                        font-size: 11px;
-                    ">
-                        <a
-                            href="https://instagram.com/lanre_legend"
-                            style="
-                                color: #111111;
-                                text-decoration: none;
-                                font-weight: 600;
-                            "
-                        >
-                            Instagram @lanre_legend
-                        </a>
-                    </p>
-
-                    <p style="
-                        margin: 7px 0 0;
-                        font-size: 11px;
-                    ">
-                        <a
-                            href="https://tiktok.com/@lanre_legend"
-                            style="
-                                color: #111111;
-                                text-decoration: none;
-                                font-weight: 600;
-                            "
-                        >
-                            TikTok @lanre_legend
-                        </a>
-                    </p>
-
-                    <p style="
-                        margin: 7px 0 0;
-                        font-size: 11px;
-                    ">
-                        <a
-                            href="https://orentemist.online"
-                            style="
-                                color: #111111;
-                                text-decoration: none;
-                                font-weight: 600;
-                            "
-                        >
-                            orentemist.online
-                        </a>
-                    </p>
+    <div style="
+        width:42px;
+        height:1px;
+        background:#555555;
+        margin:26px auto;
+    "></div>
 
 
-                    <div style="
-                        margin: 25px auto 0;
-                        width: 45px;
-                        height: 1px;
-                        background: #d8d5cf;
-                    "></div>
+    <!-- TAGLINE -->
 
-                    <p style="
-                        margin: 18px 0 0;
-                        color: #aaa7a0;
-                        font-size: 10px;
-                        line-height: 1.7;
-                    ">
-                        © ORENTEMIST
-                        <br>
-                        All rights reserved.
-                    </p>
+    <p style="
+        margin:0 auto;
+        max-width:390px;
+        color:#d0cdc7;
+        font-size:12px;
+        line-height:1.8;
+    ">
+        Crafted for those who leave an impression.
+    </p>
 
-                </div>
 
-            </div>
+    <!-- CONTACT -->
 
+    <div style="
+        margin-top:28px;
+        color:#999999;
+        font-size:11px;
+        line-height:2;
+    ">
+
+        <a
+            href="https://orentemist.online"
+            style="
+                color:#ffffff;
+                text-decoration:none;
+                font-weight:600;
+            "
+        >
+            orentemist.online
+        </a>
+
+        <br>
+
+        <a
+            href="mailto:lanrelegend@gmail.com"
+            style="
+                color:#999999;
+                text-decoration:none;
+            "
+        >
+            lanrelegend@gmail.com
+        </a>
+
+        <br>
+
+        <a
+            href="tel:09153242202"
+            style="
+                color:#999999;
+                text-decoration:none;
+            "
+        >
+            09153242202
+        </a>
+
+    </div>
+
+
+    <!-- SOCIAL LINKS -->
+
+    <div style="
+        margin-top:25px;
+    ">
+
+        <a
+            href="https://instagram.com/lanre_legend"
+            style="
+                display:inline-block;
+                margin:0 8px;
+                color:#ffffff;
+                text-decoration:none;
+                font-size:10px;
+                font-weight:600;
+                letter-spacing:1px;
+            "
+        >
+            INSTAGRAM
+        </a>
+
+        <span style="
+            color:#555555;
+            font-size:10px;
+        ">
+            •
+        </span>
+
+        <a
+            href="https://tiktok.com/@lanre_legend"
+            style="
+                display:inline-block;
+                margin:0 8px;
+                color:#ffffff;
+                text-decoration:none;
+                font-size:10px;
+                font-weight:600;
+                letter-spacing:1px;
+            "
+        >
+            TIKTOK
+        </a>
+
+        <span style="
+            color:#555555;
+            font-size:10px;
+        ">
+            •
+        </span>
+
+        <a
+            href="https://orentemist.online"
+            style="
+                display:inline-block;
+                margin:0 8px;
+                color:#ffffff;
+                text-decoration:none;
+                font-size:10px;
+                font-weight:600;
+                letter-spacing:1px;
+            "
+        >
+            WEBSITE
+        </a>
+
+    </div>
+
+
+    <!-- ADDRESS -->
+
+    <p style="
+        margin:28px 0 0;
+        color:#77736d;
+        font-size:10px;
+        line-height:1.7;
+    ">
+        22 Oyun, Ilorin, Kwara State, Nigeria
+    </p>
+
+
+    <!-- COPYRIGHT -->
+
+    <div style="
+        margin-top:25px;
+        padding-top:20px;
+        border-top:1px solid #292929;
+    ">
+
+        <p style="
+            margin:0;
+            color:#66635e;
+            font-size:9px;
+            line-height:1.7;
+        ">
+            © {timezone.now().year} ORENTEMIST
+            <br>
+            All rights reserved.
+        </p>
+
+    </div>
+
+</div>
         </div>
 
     </body>
@@ -1575,84 +1632,89 @@ class AdminCustomerDetailView(
             .select_related("profile")
             .prefetch_related("orders")
         )
+
     def post(self, request, *args, **kwargs):
 
         user = self.get_object()
 
         message = (
-            request.data.get("message", "")
-            .strip()
-        )
+        request.data.get("message", "")
+        .strip()
+    )
 
         if not message:
             return Response(
-                {
-                    "error": "Message is required."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+              {
+                "error": "Message is required."
+            },
+               status=status.HTTP_400_BAD_REQUEST,
+        )
 
         if not user.email:
             return Response(
-                {
-                    "error":
-                        "This customer does not have an email address."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            {
+                "error":
+                    "This customer does not have an email address."
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
         customer_name = (
             f"{user.first_name} {user.last_name}"
-            .strip()
-        )
+           .strip()
+    )
 
         if not customer_name:
             customer_name = (
-                user.username
-                or user.email
-                or "Customer"
-            )
+            user.username
+            or user.email
+            or "Customer"
+        )
 
         try:
 
             send_orentemist_email(
-                to_email=user.email,
-                subject="Message from ORENTEMIST",
-                heading="A message from ORENTEMIST.",
+               to_email=user.email,
+
+               subject="A message from ORENTEMIST",
+
+               heading="A message from ORENTEMIST.",
+
                 message=(
-                    f"Hello {customer_name},\n\n"
-                    f"{message}"
-                ),
+                f"Hello {customer_name},\n\n"
+                f"{message}"
+               ),
+
                 footer_message=(
-                    "If you have any questions, "
-                    "please reply to this email or "
-                    "contact ORENTEMIST Customer Support."
-                ),
-            )
+                "If you have any questions, "
+                "please reply to this email or "
+                "contact ORENTEMIST Customer Support."
+            ),
+        )
 
         except Exception as error:
 
-            print(
-                "CUSTOMER MESSAGE EMAIL ERROR:",
-                error
-            )
+           print(
+            "CUSTOMER MESSAGE EMAIL ERROR:",
+            error
+        )
 
-            return Response(
-                {
-                    "error":
-                        "Unable to send the message. "
-                        "Please try again later."
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+           return Response(
+            {
+                "error":
+                    "Unable to send the message. "
+                    "Please try again later."
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
         return Response(
-            {
-                "message":
-                    "Customer message sent successfully."
-            },
-            status=status.HTTP_200_OK,
-        )    
+        {
+            "message":
+                "Customer message sent successfully."
+        },
+        status=status.HTTP_200_OK,
+    )    
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
