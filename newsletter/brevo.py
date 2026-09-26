@@ -145,7 +145,6 @@ def create_brevo_list(
         },
     )
 
-
 def add_brevo_contacts_to_list(
     list_id,
     emails,
@@ -167,42 +166,132 @@ def add_brevo_contacts_to_list(
     all_success = []
     all_failure = []
 
-    # Keep batches reasonably sized.
+    # -----------------------------------------------------
+    # Make sure every recipient exists in Brevo first.
+    #
+    # We do NOT add them to the main newsletter list here.
+    # We only make sure the contact exists so the temporary
+    # campaign list can accept them.
+    # -----------------------------------------------------
+
+    for email in emails:
+        try:
+            brevo_request(
+                "POST",
+                "/contacts",
+                data={
+                    "email": email,
+                    "updateEnabled": True,
+                },
+            )
+        except RuntimeError as error:
+            error_message = str(error).lower()
+
+            # A contact that already exists is fine.
+            if (
+                "already exist" in error_message
+                or "already exists" in error_message
+            ):
+                continue
+
+            all_failure.append(email)
+
+    # -----------------------------------------------------
+    # Add the contacts to the temporary campaign list.
+    # -----------------------------------------------------
+
+    contacts_to_add = [
+        email
+        for email in emails
+        if email not in all_failure
+    ]
+
     for index in range(
         0,
-        len(emails),
+        len(contacts_to_add),
         500,
     ):
-        batch = emails[
+        batch = contacts_to_add[
             index:index + 500
         ]
 
-        result = brevo_request(
-            "POST",
-            f"/contacts/lists/{int(list_id)}/contacts/add",
-            data={
-                "emails": batch,
-            },
-        )
-
-        all_success.extend(
-            result.get(
-                "success",
-                [],
+        try:
+            result = brevo_request(
+                "POST",
+                f"/contacts/lists/{int(list_id)}/contacts/add",
+                data={
+                    "emails": batch,
+                },
             )
-        )
 
-        all_failure.extend(
-            result.get(
-                "failure",
-                [],
+            all_success.extend(
+                result.get(
+                    "success",
+                    [],
+                )
             )
-        )
+
+            all_failure.extend(
+                result.get(
+                    "failure",
+                    [],
+                )
+            )
+
+        except RuntimeError as error:
+            error_message = str(error).lower()
+
+            # Brevo can return this when a contact is already
+            # in the list. That is not a campaign failure.
+            if (
+                "already in list" in error_message
+                or "contact already in list" in error_message
+            ):
+                # Treat the entire batch as usable. Brevo has
+                # already accepted the contacts into the list
+                # or they were already there.
+                all_success.extend(batch)
+                continue
+
+            # If Brevo still rejects the batch, try the
+            # contacts individually so one problematic email
+            # does not break the entire campaign.
+            for email in batch:
+                try:
+                    brevo_request(
+                        "POST",
+                        f"/contacts/lists/{int(list_id)}/contacts/add",
+                        data={
+                            "emails": [email],
+                        },
+                    )
+
+                    all_success.append(email)
+
+                except RuntimeError as individual_error:
+                    individual_message = str(
+                        individual_error
+                    ).lower()
+
+                    if (
+                        "already in list"
+                        in individual_message
+                        or "contact already in list"
+                        in individual_message
+                    ):
+                        all_success.append(email)
+                    else:
+                        all_failure.append(email)
 
     return {
-        "success": all_success,
-        "failure": all_failure,
+        "success": list(
+            dict.fromkeys(all_success)
+        ),
+        "failure": list(
+            dict.fromkeys(all_failure)
+        ),
     }
+
 
 
 def remove_all_brevo_contacts_from_list(
