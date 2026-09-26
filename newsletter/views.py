@@ -15,9 +15,10 @@ from .brevo import (
     create_brevo_contact,
     delete_brevo_campaign,
     get_brevo_campaign,
-    get_brevo_campaigns,
-    get_brevo_templates,
+       get_brevo_campaigns,
+    get_brevo_draft_campaigns,
     send_brevo_campaign,
+    send_brevo_draft_campaign,
     send_brevo_test,
     unsubscribe_brevo_contact,
 )
@@ -235,16 +236,32 @@ class NewsletterTemplatesView(APIView):
 
     def get(self, request):
         try:
-            data = get_brevo_templates()
+            data = get_brevo_draft_campaigns()
+
+            templates = []
+
+            for campaign in data.get("campaigns", []):
+                templates.append(
+                    {
+                        "id": campaign.get("id"),
+                        "templateId": campaign.get("id"),
+                        "name": campaign.get("name") or "Untitled Template",
+                        "subject": campaign.get("subject") or "",
+                        "htmlContent": campaign.get("htmlContent") or "",
+                        "html_content": campaign.get("htmlContent") or "",
+                        "status": campaign.get("status") or "draft",
+                        "createdAt": campaign.get("createdAt"),
+                        "modifiedAt": campaign.get("modifiedAt"),
+                    }
+                )
 
             return Response(
-                data.get("templates", []),
+                {"templates": templates},
                 status=status.HTTP_200_OK,
             )
 
         except Exception as error:
             return brevo_error_response(error)
-
 
 class NewsletterCampaignsView(APIView):
     permission_classes = [IsAdminUser]
@@ -586,6 +603,20 @@ class NewsletterCampaignsView(APIView):
         except Exception as error:
             return brevo_error_response(error)
 
+class NewsletterCampaignSendDraftView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        try:
+            result = send_brevo_draft_campaign(pk)
+
+            return Response(
+                result,
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as error:
+            return brevo_error_response(error)
 
 class NewsletterCampaignTestView(APIView):
     permission_classes = [IsAdminUser]
@@ -604,28 +635,10 @@ class NewsletterCampaignTestView(APIView):
             "template_id"
         )
 
-        subject = (
-            request.data.get(
-                "subject",
-                "",
-            )
-            .strip()
-        )
-
-        preview = (
-            request.data.get(
-                "preview",
-                "",
-            )
-            .strip()
-        )
-
         if not email:
             return Response(
                 {
-                    "error": (
-                        "Test email is required."
-                    )
+                    "error": "Test email is required."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -633,17 +646,13 @@ class NewsletterCampaignTestView(APIView):
         if not template_id:
             return Response(
                 {
-                    "error": (
-                        "Template is required."
-                    )
+                    "error": "Template is required."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            template_id = int(
-                template_id
-            )
+            template_id = int(template_id)
         except (
             TypeError,
             ValueError,
@@ -655,74 +664,21 @@ class NewsletterCampaignTestView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        temporary_campaign_id = None
-
         try:
-            temporary_campaign = (
-                create_brevo_campaign(
-                    name=(
-                        f"ORENTEMIST TEST - "
-                        f"{timezone.now().strftime('%Y%m%d%H%M%S')}"
-                    ),
-                    subject=(
-                        subject
-                        or "ORENTEMIST Newsletter Test"
-                    ),
-                    preview=preview,
-                    template_id=template_id,
-                    sender_name=(
-                        settings.BREVO_DEFAULT_SENDER_NAME
-                    ),
-                    sender_email=(
-                        settings.BREVO_DEFAULT_SENDER_EMAIL
-                    ),
-                )
-            )
-
-            temporary_campaign_id = (
-                temporary_campaign.get("id")
-            )
-
-            if not temporary_campaign_id:
-                raise RuntimeError(
-                    "Brevo did not return a test campaign ID."
-                )
-
-            send_brevo_test(
-                temporary_campaign_id,
+            result = send_brevo_test(
+                template_id,
                 email,
             )
 
-            try:
-                delete_brevo_campaign(
-                    temporary_campaign_id
-                )
-            except Exception as cleanup_error:
-                print(
-                    "BREVO TEST CLEANUP ERROR:",
-                    cleanup_error,
-                )
-
             return Response(
-                {
-                    "message": (
-                        "Test newsletter sent successfully."
-                    )
-                },
+                result,
                 status=status.HTTP_200_OK,
             )
 
         except Exception as error:
-            if temporary_campaign_id:
-                try:
-                    delete_brevo_campaign(
-                        temporary_campaign_id
-                    )
-                except Exception:
-                    pass
-
             return brevo_error_response(error)
 
+        
 
 class NewsletterCampaignRefreshView(APIView):
     permission_classes = [IsAdminUser]

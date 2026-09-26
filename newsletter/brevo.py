@@ -95,6 +95,19 @@ def get_brevo_campaign(
         f"/emailCampaigns/{campaign_id}",
     )
 
+def get_brevo_draft_campaigns():
+    return brevo_request(
+        "GET",
+        "/emailCampaigns",
+        params={
+            "status": "draft",
+            "type": "classic",
+            "limit": 100,
+            "offset": 0,
+            "sort": "desc",
+        },
+    )
+
 
 def create_brevo_contact(
     email,
@@ -211,6 +224,14 @@ def send_brevo_campaign(
         f"/emailCampaigns/{campaign_id}/sendNow",
     )
 
+
+def send_brevo_draft_campaign(
+    campaign_id,
+):
+    return brevo_request(
+        "POST",
+        f"/emailCampaigns/{campaign_id}/sendNow",
+    )
 
 def delete_brevo_campaign(
     campaign_id,
