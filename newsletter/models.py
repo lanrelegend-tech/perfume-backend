@@ -38,6 +38,8 @@ class NewsletterSubscriber(models.Model):
 class NewsletterCampaign(models.Model):
     brevo_campaign_id = models.PositiveBigIntegerField(
         unique=True,
+        null=True,
+        blank=True,
     )
 
     name = models.CharField(
@@ -52,7 +54,10 @@ class NewsletterCampaign(models.Model):
         blank=True,
     )
 
-    template_id = models.PositiveBigIntegerField()
+    template_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+    )
 
     sender_name = models.CharField(
         max_length=255,
@@ -81,6 +86,29 @@ class NewsletterCampaign(models.Model):
 
     sent_at = models.DateTimeField(
         null=True,
+        blank=True,
+    )
+
+    # Newsletter builder content
+    hero_image = models.URLField(
+        blank=True,
+    )
+
+    heading = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    body = models.TextField(
+        blank=True,
+    )
+
+    button_text = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    button_url = models.URLField(
         blank=True,
     )
 

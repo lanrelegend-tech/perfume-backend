@@ -95,6 +95,7 @@ def get_brevo_campaign(
         f"/emailCampaigns/{campaign_id}",
     )
 
+
 def get_brevo_draft_campaigns():
     return brevo_request(
         "GET",
@@ -201,6 +202,45 @@ def create_brevo_campaign(
     )
 
 
+def create_brevo_html_campaign(
+    name,
+    subject,
+    preview,
+    html_content,
+    sender_name,
+    sender_email,
+):
+    list_id = settings.BREVO_LIST_ID
+
+    if not list_id:
+        raise RuntimeError(
+            "BREVO_LIST_ID is not configured."
+        )
+
+    data = {
+        "name": name,
+        "subject": subject,
+        "previewText": preview,
+        "sender": {
+            "name": sender_name,
+            "email": sender_email,
+        },
+        "recipients": {
+            "listIds": [
+                int(list_id)
+            ],
+        },
+        "htmlContent": html_content,
+        "type": "classic",
+    }
+
+    return brevo_request(
+        "POST",
+        "/emailCampaigns",
+        data=data,
+    )
+
+
 def send_brevo_test(
     campaign_id,
     email,
@@ -232,6 +272,7 @@ def send_brevo_draft_campaign(
         "POST",
         f"/emailCampaigns/{campaign_id}/sendNow",
     )
+
 
 def delete_brevo_campaign(
     campaign_id,
