@@ -9,7 +9,12 @@ class ShippingRate(models.Model):
 
     state = models.CharField(
         max_length=100,
-        unique=True,
+        blank=True,
+        null=True,
+    )
+
+    city = models.CharField(
+        max_length=100,
         blank=True,
         null=True,
     )
@@ -44,10 +49,23 @@ class ShippingRate(models.Model):
     )
 
     class Meta:
-        ordering = ["delivery_type", "state"]
+        ordering = [
+            "delivery_type",
+            "state",
+            "city",
+        ]
 
     def __str__(self):
         if self.delivery_type == "pickup":
             return f"Pickup - ₦{self.delivery_fee}"
 
-        return f"{self.state} - ₦{self.delivery_fee}"
+        if self.city:
+            return (
+                f"{self.city}, {self.state}"
+                f" - ₦{self.delivery_fee}"
+            )
+
+        return (
+            f"{self.state}"
+            f" - ₦{self.delivery_fee}"
+        )

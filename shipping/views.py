@@ -1,20 +1,29 @@
 from rest_framework import generics
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import (
+    AllowAny,
+    IsAdminUser,
+)
 
 from .models import ShippingRate
 from .serializers import ShippingRateSerializer
 
 
-class ShippingRateListCreateView(generics.ListCreateAPIView):
+class ShippingRateListCreateView(
+    generics.ListCreateAPIView
+):
     serializer_class = ShippingRateSerializer
 
     def get_queryset(self):
         user = self.request.user
 
-        if user.is_authenticated and user.is_staff:
+        if (
+            user.is_authenticated
+            and user.is_staff
+        ):
             return ShippingRate.objects.all().order_by(
                 "delivery_type",
                 "state",
+                "city",
                 "id",
             )
 
@@ -23,6 +32,7 @@ class ShippingRateListCreateView(generics.ListCreateAPIView):
         ).order_by(
             "delivery_type",
             "state",
+            "city",
             "id",
         )
 
@@ -33,13 +43,18 @@ class ShippingRateListCreateView(generics.ListCreateAPIView):
         return [IsAdminUser()]
 
 
-class ShippingRateDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ShippingRateDetailView(
+    generics.RetrieveUpdateDestroyAPIView
+):
     serializer_class = ShippingRateSerializer
 
     def get_queryset(self):
         user = self.request.user
 
-        if user.is_authenticated and user.is_staff:
+        if (
+            user.is_authenticated
+            and user.is_staff
+        ):
             return ShippingRate.objects.all()
 
         return ShippingRate.objects.filter(
