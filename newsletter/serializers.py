@@ -96,4 +96,5 @@ class NewsletterCampaignSerializer(
             "sentAt",
             "created_at",
             "updated_at",
+            "content_image"
         ]

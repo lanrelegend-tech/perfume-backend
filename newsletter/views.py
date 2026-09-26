@@ -416,6 +416,7 @@ def calculate_audience(
 
 def build_newsletter_html(
     hero_image="",
+    content_image="",
     heading="",
     body="",
     button_text="",
@@ -424,6 +425,10 @@ def build_newsletter_html(
     safe_hero_image = escape(
         hero_image or ""
     )
+
+    safe_content_image = escape(
+    content_image or ""
+)
 
     safe_heading = escape(
         heading or ""
@@ -473,6 +478,41 @@ def build_newsletter_html(
             </td>
         </tr>
         """
+
+
+
+
+
+
+
+    content_image_html = ""
+
+    if safe_content_image:
+       content_image_html = f"""
+    <tr>
+        <td
+            style="
+                padding:0 40px 30px 40px;
+                margin:0;
+            "
+        >
+            <img
+                src="{safe_content_image}"
+                alt="ORENTEMIST"
+                width="520"
+                style="
+                    display:block;
+                    width:100%;
+                    max-width:520px;
+                    height:auto;
+                    border:0;
+                    margin:0 auto;
+                "
+            />
+        </td>
+    </tr>
+    """
+
 
     button_html = ""
 
@@ -613,6 +653,7 @@ def build_newsletter_html(
 </td>
 </tr>
 
+
 <tr>
 <td
     style="
@@ -634,9 +675,9 @@ def build_newsletter_html(
 </td>
 </tr>
 
-{button_html}
+{content_image_html}
 
-<tr>
+
 <td
     align="center"
     style="
@@ -1236,6 +1277,12 @@ class NewsletterCampaignsView(APIView):
                             else ""
                         ),
 
+                        "content_image": (
+                           local.content_image
+                           if local
+                           else ""
+                        ),
+
                         "heading": (
                             local.heading
                             if local
@@ -1338,6 +1385,13 @@ class NewsletterCampaignsView(APIView):
                             local.hero_image
                         ),
 
+
+                        "content_image": (
+
+                             local.content_image
+
+                        ),
+
                         "heading": (
                             local.heading
                         ),
@@ -1401,6 +1455,15 @@ class NewsletterCampaignsView(APIView):
             )
             .strip()
         )
+
+
+        content_image = (
+           request.data.get(
+        "content_image",
+        "",
+          )
+          .strip()
+)
 
         heading = (
             request.data.get(
@@ -1529,14 +1592,15 @@ class NewsletterCampaignsView(APIView):
             )
 
         html_content = (
-            build_newsletter_html(
-                hero_image=hero_image,
-                heading=heading,
-                body=body,
-                button_text=button_text,
-                button_url=button_url,
-            )
-        )
+           build_newsletter_html(
+        hero_image=hero_image,
+        content_image=content_image,
+        heading=heading,
+        body=body,
+        button_text=button_text,
+        button_url=button_url,
+    )
+)
 
         temp_list_id = None
         brevo_campaign_id = None
@@ -1720,6 +1784,7 @@ class NewsletterCampaignsView(APIView):
                     status="draft",
 
                     hero_image=hero_image,
+                    content_image=content_image,
 
                     heading=heading,
 
@@ -2071,6 +2136,16 @@ class NewsletterCampaignTestView(
             .strip()
         )
 
+        content_image = (
+             request.data.get(
+        "content_image",
+        "",
+    )
+    .strip()
+)
+
+
+
         heading = (
             request.data.get(
                 "heading",
@@ -2194,6 +2269,7 @@ class NewsletterCampaignTestView(
         try:
             html_content = build_newsletter_html(
                 hero_image=hero_image,
+                content_image=content_image,
                 heading=heading,
                 body=body,
                 button_text=button_text,

@@ -90,14 +90,9 @@ class NewsletterCampaign(models.Model):
     )
 
     # Newsletter builder content
-    hero_image = models.URLField(
-        blank=True,
-    )
-
-    heading = models.CharField(
-        max_length=255,
-        blank=True,
-    )
+    hero_image = models.URLField(blank=True)
+    content_image = models.URLField(blank=True)
+    heading = models.CharField(max_length=255, blank=True)
 
     body = models.TextField(
         blank=True,
