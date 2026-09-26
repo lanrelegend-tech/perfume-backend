@@ -111,6 +111,21 @@ class NewsletterCampaign(models.Model):
     button_url = models.URLField(
         blank=True,
     )
+        # Campaign audience settings
+    recipient_type = models.CharField(
+        max_length=50,
+        default="subscribers",
+    )
+
+    audience_config = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    recipient_emails = models.JSONField(
+        default=list,
+        blank=True,
+    )
 
     created_at = models.DateTimeField(
         auto_now_add=True,

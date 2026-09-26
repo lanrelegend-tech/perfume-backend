@@ -1,7 +1,9 @@
 from django.urls import path
 
 from .views import (
+    NewsletterAudiencePreviewView,
     NewsletterCampaignRefreshView,
+    NewsletterCampaignSendDraftView,
     NewsletterCampaignTestView,
     NewsletterCampaignsView,
     NewsletterSubscribeView,
@@ -37,9 +39,21 @@ urlpatterns = [
     ),
 
     path(
+        "audience/preview/",
+        NewsletterAudiencePreviewView.as_view(),
+        name="newsletter-audience-preview",
+    ),
+
+    path(
         "campaigns/",
         NewsletterCampaignsView.as_view(),
         name="newsletter-campaigns",
+    ),
+
+    path(
+        "campaigns/<int:pk>/send/",
+        NewsletterCampaignSendDraftView.as_view(),
+        name="newsletter-campaign-send-draft",
     ),
 
     path(
