@@ -1826,6 +1826,12 @@ class VerifyPaymentView(APIView):
             "data",
             {}
         )
+        print("======================================")
+        print("PAYSTACK VERIFIED PAYMENT")
+        print("REFERENCE:", payment.get("reference"))
+        print("METADATA:", payment.get("metadata"))
+        print("METADATA TYPE:", type(payment.get("metadata")))
+        print("======================================")
 
         # -------------------------------------------------
         # VERIFY REFERENCE
