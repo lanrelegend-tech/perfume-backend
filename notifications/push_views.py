@@ -193,7 +193,6 @@ class AdminPushPublicKeyView(APIView):
             }
         )
 
-
 class AdminTestPushView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -229,6 +228,8 @@ class AdminTestPushView(APIView):
             )
         )
 
+        subscriptions_info = []
+
         sent = 0
         removed = 0
 
@@ -240,6 +241,13 @@ class AdminTestPushView(APIView):
                     "auth": subscription.auth,
                 },
             }
+
+            subscriptions_info.append({
+                "endpoint": subscription.endpoint,
+                "endpoint_tail": subscription.endpoint[-80:],
+                "is_active": subscription.is_active,
+                "user_id": subscription.user_id,
+            })
 
             try:
                 webpush(
@@ -284,6 +292,7 @@ class AdminTestPushView(APIView):
                 "success": True,
                 "sent": sent,
                 "removed": removed,
+                "subscriptions": subscriptions_info,
             }
         )
 
