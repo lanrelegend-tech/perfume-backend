@@ -546,7 +546,6 @@ def _get_payment_metadata(payment):
 
     return {}
 
-
 def _payment_metadata_matches_order(
     order,
     payment,
@@ -565,33 +564,73 @@ def _payment_metadata_matches_order(
         "checkout_token"
     )
 
-    # Metadata must contain all required
-    # payment-binding fields.
-    if (
-        metadata_order_id is None
-        or metadata_order_number is None
-        or metadata_checkout_token is None
-    ):
-        return False
-
-    # Every metadata value must match
-    # the exact order being verified.
-    if (
+    order_id_matches = (
         str(metadata_order_id)
-        != str(order.id)
-    ):
-        return False
+        == str(order.id)
+    )
 
-    if (
+    order_number_matches = (
         str(metadata_order_number)
-        != str(order.order_number)
-    ):
+        == str(order.order_number)
+    )
+
+    checkout_token_matches = (
+        str(metadata_checkout_token)
+        == str(order.checkout_token)
+    )
+
+    print("======================================")
+    print("PAYMENT METADATA CHECK")
+    print(
+        "METADATA ORDER ID:",
+        metadata_order_id,
+    )
+    print(
+        "DATABASE ORDER ID:",
+        order.id,
+    )
+    print(
+        "ORDER ID MATCH:",
+        order_id_matches,
+    )
+    print(
+        "METADATA ORDER NUMBER:",
+        metadata_order_number,
+    )
+    print(
+        "DATABASE ORDER NUMBER:",
+        order.order_number,
+    )
+    print(
+        "ORDER NUMBER MATCH:",
+        order_number_matches,
+    )
+    print(
+        "CHECKOUT TOKEN MATCH:",
+        checkout_token_matches,
+    )
+    print(
+        "CHECKOUT TOKEN PRESENT:",
+        bool(metadata_checkout_token),
+    )
+    print("======================================")
+
+    if not metadata_order_id:
         return False
 
-    if (
-        str(metadata_checkout_token)
-        != str(order.checkout_token)
-    ):
+    if not metadata_order_number:
+        return False
+
+    if not metadata_checkout_token:
+        return False
+
+    if not order_id_matches:
+        return False
+
+    if not order_number_matches:
+        return False
+
+    if not checkout_token_matches:
         return False
 
     return True
