@@ -54,6 +54,9 @@ def send_admin_push_notification(
         "body": message,
         "url": url,
         "tag": tag or f"orentemist-{notification_type}",
+        "icon": "https://www.orentemist.online/icons/icon-192x192.png",
+        "badge": "https://www.orentemist.online/icons/icon-192x192.png",
+    
     }
 
     sent = 0
@@ -215,6 +218,8 @@ class AdminTestPushView(APIView):
             "body": message,
             "url": url,
             "tag": "orentemist-admin-test",
+            "icon": "https://www.orentemist.online/icons/icon-192x192.png",
+            "badge": "https://www.orentemist.online/icons/icon-192x192.png",
         }
 
         subscriptions = (
@@ -328,6 +333,8 @@ class AdminNotificationPushView(APIView):
             "url": url,
             "notification_id": notification.id,
             "tag": f"orentemist-{notification_type}",
+            "icon": "https://www.orentemist.online/icons/icon-192x192.png",
+            "badge": "https://www.orentemist.online/icons/icon-192x192.png",  
         }
 
         subscriptions = (
