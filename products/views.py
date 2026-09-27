@@ -17,6 +17,9 @@ from .serializers import (
     AdminProductImageSerializer,
 )
 
+LOW_STOCK_THRESHOLD = 3
+
+
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
     serializer_class = ProductSerializer
