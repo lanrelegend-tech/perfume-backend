@@ -948,37 +948,45 @@ def _finalize_successful_payment(
 
         locked_products[product_id] = product
 
+
+
+
+    # -------------------------------------------------
+    # REDUCE STOCK + PREPARE STOCK ALERTS
+    # -------------------------------------------------
+
+    stock_alerts = []
+
     # -------------------------------------------------
     # REDUCE VARIANT STOCK
-    #
-    # IMPORTANT:
-    # Pre-orders must NOT reduce stock.
     # -------------------------------------------------
 
     for variant_id, quantity in variant_requirements.items():
 
         variant = locked_variants[variant_id]
 
-        variant_stock = int(
+        variant_stock_before = int(
             variant.stock_quantity or 0
         )
 
         product = variant.product
 
-        product_stock = int(
+        product_stock_before = int(
             product.stock_quantity or 0
         )
 
         is_preorder = (
-            variant_stock == 0
-            and product_stock == 0
+            variant_stock_before == 0
+            and product_stock_before == 0
             and product.is_preorder is True
         )
 
         if is_preorder:
             continue
 
-        variant.stock_quantity -= quantity
+        variant.stock_quantity = (
+            variant_stock_before - quantity
+        )
 
         variant.in_stock = (
             variant.stock_quantity > 0
@@ -991,30 +999,69 @@ def _finalize_successful_payment(
             ]
         )
 
+        stock_after = int(
+            variant.stock_quantity or 0
+        )
+
+        # -------------------------------------------------
+        # SOLD OUT
+        # -------------------------------------------------
+
+        if (
+            variant_stock_before > 0
+            and stock_after == 0
+        ):
+
+            stock_alerts.append({
+                "type": "sold_out",
+                "product_name": product.name,
+                "size": variant.size,
+                "stock": stock_after,
+                "product_id": product.id,
+                "variant_id": variant.id,
+            })
+
+        # -------------------------------------------------
+        # LOW STOCK
+        # -------------------------------------------------
+
+        elif (
+            variant_stock_before > LOW_STOCK_THRESHOLD
+            and 0 < stock_after <= LOW_STOCK_THRESHOLD
+        ):
+
+            stock_alerts.append({
+                "type": "low_stock",
+                "product_name": product.name,
+                "size": variant.size,
+                "stock": stock_after,
+                "product_id": product.id,
+                "variant_id": variant.id,
+            })
+
     # -------------------------------------------------
     # REDUCE PRODUCT STOCK
-    #
-    # IMPORTANT:
-    # Pre-orders must NOT reduce stock.
     # -------------------------------------------------
 
     for product_id, quantity in product_requirements.items():
 
         product = locked_products[product_id]
 
-        product_stock = int(
+        product_stock_before = int(
             product.stock_quantity or 0
         )
 
         is_preorder = (
-            product_stock == 0
+            product_stock_before == 0
             and product.is_preorder is True
         )
 
         if is_preorder:
             continue
 
-        product.stock_quantity -= quantity
+        product.stock_quantity = (
+            product_stock_before - quantity
+        )
 
         product.in_stock = (
             product.stock_quantity > 0
@@ -1026,6 +1073,47 @@ def _finalize_successful_payment(
                 "in_stock",
             ]
         )
+
+        stock_after = int(
+            product.stock_quantity or 0
+        )
+
+        # -------------------------------------------------
+        # SOLD OUT
+        # -------------------------------------------------
+
+        if (
+            product_stock_before > 0
+            and stock_after == 0
+        ):
+
+            stock_alerts.append({
+                "type": "sold_out",
+                "product_name": product.name,
+                "size": "",
+                "stock": stock_after,
+                "product_id": product.id,
+                "variant_id": None,
+            })
+
+        # -------------------------------------------------
+        # LOW STOCK
+        # -------------------------------------------------
+
+        elif (
+            product_stock_before > LOW_STOCK_THRESHOLD
+            and 0 < stock_after <= LOW_STOCK_THRESHOLD
+        ):
+
+            stock_alerts.append({
+                "type": "low_stock",
+                "product_name": product.name,
+                "size": "",
+                "stock": stock_after,
+                "product_id": product.id,
+                "variant_id": None,
+            })
+
     # -------------------------------------------------
     # COUPON
     # -------------------------------------------------
@@ -1061,10 +1149,96 @@ def _finalize_successful_payment(
         )
 
         if order.user:
+
             coupon.used_by.add(
                 order.user
             )
 
+    # -------------------------------------------------
+    # ADMIN STOCK PUSH NOTIFICATIONS
+    # -------------------------------------------------
+
+    for alert in stock_alerts:
+
+        if alert["type"] == "sold_out":
+
+            if alert["size"]:
+
+                stock_message = (
+                    f"{alert['product_name']} "
+                    f"{alert['size']} is now sold out."
+                )
+
+            else:
+
+                stock_message = (
+                    f"{alert['product_name']} "
+                    f"is now sold out."
+                )
+
+            stock_title = "🚫 Sold Out"
+
+            stock_tag = (
+                f"orentemist-sold-out-"
+                f"{alert['variant_id'] or alert['product_id']}"
+            )
+
+        else:
+
+            if alert["size"]:
+
+                stock_message = (
+                    f"{alert['product_name']} "
+                    f"{alert['size']} has only "
+                    f"{alert['stock']} left in stock."
+                )
+
+            else:
+
+                stock_message = (
+                    f"{alert['product_name']} has only "
+                    f"{alert['stock']} left in stock."
+                )
+
+            stock_title = "⚠️ Low Stock"
+
+            stock_tag = (
+                f"orentemist-low-stock-"
+                f"{alert['variant_id'] or alert['product_id']}"
+            )
+
+        def send_stock_push_after_commit(
+            title=stock_title,
+            message=stock_message,
+            tag=stock_tag,
+        ):
+
+            try:
+
+                from notifications.push_views import (
+                    send_admin_push_notification
+                )
+
+                send_admin_push_notification(
+                    title=title,
+                    message=message,
+                    url="/admin",
+                    notification_type="system",
+                    tag=tag,
+                )
+
+            except Exception as exc:
+
+                print(
+                    "ADMIN STOCK PUSH ERROR:",
+                    repr(exc),
+                )
+
+        transaction.on_commit(
+            send_stock_push_after_commit
+        )
+
+        
     # -------------------------------------------------
     # MARK ORDER PAID
     # -------------------------------------------------
