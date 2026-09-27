@@ -72,10 +72,11 @@ class Order(models.Model):
     )
 
     payment_reference = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True
-    )
+    max_length=100,
+    blank=True,
+    null=True,
+    unique=True
+     ) 
     checkout_token = models.UUIDField(
     default=uuid.uuid4,
     unique=True,
@@ -146,7 +147,8 @@ class Order(models.Model):
 
         if not self.order_number:
             import uuid
-            self.order_number = f"VELRA-{uuid.uuid4().hex[:10].upper()}"
+            self.order_number = f"ORENTEMIST-{uuid.uuid4().hex[:10].upper()}"
+          
 
         if self.status == "shipped" and not self.shipped_at:
             self.shipped_at = timezone.now()

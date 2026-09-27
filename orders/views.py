@@ -1404,7 +1404,7 @@ def _finalize_successful_payment(
 class InitializePaymentView(APIView):
 
     permission_classes = [AllowAny]
-
+    @transaction.atomic
     def post(self, request, order_id):
 
         checkout_token = (
@@ -1433,6 +1433,7 @@ class InitializePaymentView(APIView):
 
             order = (
                 Order.objects
+                .select_for_update()
                 .get(
                     id=order_id,
                     checkout_token=checkout_token,
@@ -2826,6 +2827,9 @@ class OrderTrackingView(generics.RetrieveAPIView):
             "items",
             "status_history"
         )
+
+
+
 class CreateOrderView(APIView):
     permission_classes = [AllowAny]
 
@@ -2837,6 +2841,24 @@ class CreateOrderView(APIView):
             if not isinstance(browser_cart, list) or not browser_cart:
                 return Response(
                     {"error": "Cart is empty or invalid."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # -------------------------------------------------
+            # CART LIMITS
+            # -------------------------------------------------
+
+            MAX_CART_LINES = 50
+            MAX_ITEM_QUANTITY = 20
+
+            if len(browser_cart) > MAX_CART_LINES:
+                return Response(
+                    {
+                        "error": (
+                            f"Cart cannot contain more than "
+                            f"{MAX_CART_LINES} different items."
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -2919,12 +2941,14 @@ class CreateOrderView(APIView):
             )
 
             products_total = Decimal("0.00")
-
             order_items = []
 
-            # ---------------------------------
-            # VALIDATE BROWSER CART
-            # ---------------------------------
+            # -------------------------------------------------
+            # FIRST PASS
+            # VALIDATE + COMBINE DUPLICATE CART ITEMS
+            # -------------------------------------------------
+
+            aggregated_cart = {}
 
             for browser_item in browser_cart:
 
@@ -2961,6 +2985,14 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
+                if product_id <= 0:
+                    return Response(
+                        {
+                            "error": "Invalid product ID."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
                 if quantity <= 0:
                     return Response(
                         {
@@ -2972,9 +3004,115 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-                # ---------------------------------
-                # GET PRODUCT FROM DATABASE
-                # ---------------------------------
+                # ---------------------------------------------
+                # NORMALIZE VARIANT ID
+                # ---------------------------------------------
+
+                variant_id = browser_item.get(
+                    "variant_id"
+                )
+
+                if variant_id in [
+                    None,
+                    "",
+                    0,
+                    "0",
+                ]:
+                    normalized_variant_id = None
+
+                else:
+
+                    try:
+                        normalized_variant_id = int(
+                            variant_id
+                        )
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    "Invalid variant ID."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if normalized_variant_id <= 0:
+                        return Response(
+                            {
+                                "error": (
+                                    "Invalid variant ID."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                # ---------------------------------------------
+                # COMBINE SAME PRODUCT + SAME VARIANT
+                # ---------------------------------------------
+
+                key = (
+                    product_id,
+                    normalized_variant_id,
+                )
+
+                if key not in aggregated_cart:
+                    aggregated_cart[key] = {
+                        "product_id": product_id,
+                        "variant_id": normalized_variant_id,
+                        "quantity": 0,
+                        "size": (
+                            browser_item.get("size")
+                            or ""
+                        ),
+                    }
+
+                aggregated_cart[key]["quantity"] += quantity
+
+                # ---------------------------------------------
+                # MAX QUANTITY
+                # ---------------------------------------------
+
+                if (
+                    aggregated_cart[key]["quantity"]
+                    > MAX_ITEM_QUANTITY
+                ):
+                    return Response(
+                        {
+                            "error": (
+                                f"You cannot order more than "
+                                f"{MAX_ITEM_QUANTITY} units of "
+                                "the same product/variant."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # -------------------------------------------------
+            # SECOND PASS
+            # DATABASE PRODUCTS + SERVER-SIDE PRICES
+            # -------------------------------------------------
+
+            for cart_item in aggregated_cart.values():
+
+                product_id = cart_item[
+                    "product_id"
+                ]
+
+                variant_id = cart_item[
+                    "variant_id"
+                ]
+
+                quantity = cart_item[
+                    "quantity"
+                ]
+
+                # ---------------------------------------------
+                # GET PRODUCT
+                # ---------------------------------------------
 
                 try:
                     product = Product.objects.get(
@@ -2992,40 +3130,13 @@ class CreateOrderView(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-                # ---------------------------------
-                # CHECK VARIANT
-                # ---------------------------------
+                # ---------------------------------------------
+                # GET VARIANT
+                # ---------------------------------------------
 
                 variant = None
 
-                variant_id = browser_item.get(
-                    "variant_id"
-                )
-
-                if variant_id not in [
-                    None,
-                    "",
-                    0,
-                    "0",
-                ]:
-
-                    try:
-                        variant_id = int(
-                            variant_id
-                        )
-
-                    except (
-                        TypeError,
-                        ValueError,
-                    ):
-                        return Response(
-                            {
-                                "error": (
-                                    "Invalid variant ID."
-                                )
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
+                if variant_id is not None:
 
                     try:
                         variant = (
@@ -3047,9 +3158,9 @@ class CreateOrderView(APIView):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
 
-                # ---------------------------------
-                # STOCK + PRE-ORDER
-                # ---------------------------------
+                # ---------------------------------------------
+                # VARIANT STOCK
+                # ---------------------------------------------
 
                 if variant:
 
@@ -3073,6 +3184,7 @@ class CreateOrderView(APIView):
                     )
 
                     # NORMAL PURCHASE
+
                     if variant_has_stock:
 
                         if quantity > variant_stock:
@@ -3090,15 +3202,14 @@ class CreateOrderView(APIView):
                                 status=status.HTTP_400_BAD_REQUEST,
                             )
 
-                    # PRE-ORDER
-                    elif is_preorder:
+                    # PREORDER
 
-                        # No stock limit for a preorder.
+                    elif is_preorder:
                         pass
 
                     # SOLD OUT
-                    else:
 
+                    else:
                         return Response(
                             {
                                 "error": (
@@ -3111,12 +3222,11 @@ class CreateOrderView(APIView):
                         )
 
                     item_price = variant.price
-
                     item_size = variant.size
 
-                # ---------------------------------
+                # -------------------------------------------------
                 # PRODUCT STOCK
-                # ---------------------------------
+                # -------------------------------------------------
 
                 else:
 
@@ -3135,6 +3245,7 @@ class CreateOrderView(APIView):
                     )
 
                     # NORMAL PURCHASE
+
                     if product_has_stock:
 
                         if quantity > product_stock:
@@ -3151,15 +3262,14 @@ class CreateOrderView(APIView):
                                 status=status.HTTP_400_BAD_REQUEST,
                             )
 
-                    # PRE-ORDER
-                    elif is_preorder:
+                    # PREORDER
 
-                        # No stock limit for a preorder.
+                    elif is_preorder:
                         pass
 
                     # SOLD OUT
-                    else:
 
+                    else:
                         return Response(
                             {
                                 "error": (
@@ -3173,13 +3283,13 @@ class CreateOrderView(APIView):
                     item_price = product.price
 
                     item_size = (
-                        browser_item.get("size")
+                        cart_item.get("size")
                         or ""
                     )
 
-                # ---------------------------------
-                # CALCULATE ITEM PRICE
-                # ---------------------------------
+                # -------------------------------------------------
+                # SERVER-SIDE PRICE
+                # -------------------------------------------------
 
                 item_price = Decimal(
                     str(item_price)
@@ -3190,10 +3300,6 @@ class CreateOrderView(APIView):
                 )
 
                 products_total += item_subtotal
-
-                # ---------------------------------
-                # SAVE VALIDATED ITEM
-                # ---------------------------------
 
                 order_items.append(
                     {
@@ -3207,9 +3313,9 @@ class CreateOrderView(APIView):
                     }
                 )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # SHIPPING
-            # ---------------------------------
+            # -------------------------------------------------
 
             shipping_rate = None
 
@@ -3233,8 +3339,6 @@ class CreateOrderView(APIView):
 
             else:
 
-                # Normalize the state entered
-                # by the customer.
                 normalized_state = state.strip()
 
                 shipping_rate = (
@@ -3276,9 +3380,9 @@ class CreateOrderView(APIView):
                     or pickup_address
                 )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # COUPON
-            # ---------------------------------
+            # -------------------------------------------------
 
             coupon = None
 
@@ -3341,8 +3445,7 @@ class CreateOrderView(APIView):
                         )
 
                     if (
-                        coupon.usage_limit
-                        is not None
+                        coupon.usage_limit is not None
                         and coupon.used_count
                         >= coupon.usage_limit
                     ):
@@ -3356,27 +3459,135 @@ class CreateOrderView(APIView):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
 
+                    # -----------------------------------------
+                    # MINIMUM ORDER AMOUNT
+                    # -----------------------------------------
+
+                    minimum_order_amount = Decimal(
+                        str(
+                            coupon.minimum_order_amount
+                            or 0
+                        )
+                    )
+
+                    if (
+                        products_total
+                        < minimum_order_amount
+                    ):
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon requires a "
+                                    f"minimum product total "
+                                    f"of "
+                                    f"₦{minimum_order_amount:,.2f}."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # -----------------------------------------
+                    # DISCOUNT VALUE
+                    # -----------------------------------------
+
+                    coupon_value = Decimal(
+                        str(
+                            coupon.discount_value
+                            or 0
+                        )
+                    )
+
+                    if coupon_value <= 0:
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon has an invalid "
+                                    "discount value."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # -----------------------------------------
+                    # PERCENTAGE
+                    # -----------------------------------------
+
                     if (
                         coupon.discount_type
                         == "percentage"
                     ):
 
+                        if coupon_value > 100:
+                            return Response(
+                                {
+                                    "error": (
+                                        "This coupon has an "
+                                        "invalid percentage "
+                                        "discount."
+                                    )
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
                         discount = (
                             products_total
-                            * Decimal(
-                                str(
-                                    coupon.discount_value
-                                )
-                            )
+                            * coupon_value
                             / Decimal("100")
                         )
 
-                    else:
+                    # -----------------------------------------
+                    # FIXED
+                    # -----------------------------------------
 
-                        discount = Decimal(
+                    elif (
+                        coupon.discount_type
+                        == "fixed"
+                    ):
+
+                        discount = coupon_value
+
+                    # -----------------------------------------
+                    # INVALID TYPE
+                    # -----------------------------------------
+
+                    else:
+                        return Response(
+                            {
+                                "error": (
+                                    "This coupon has an invalid "
+                                    "discount type."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # -----------------------------------------
+                    # MAXIMUM DISCOUNT
+                    # -----------------------------------------
+
+                    if coupon.maximum_discount is not None:
+
+                        maximum_discount = Decimal(
                             str(
-                                coupon.discount_value
+                                coupon.maximum_discount
                             )
+                        )
+
+                        if maximum_discount < 0:
+                            return Response(
+                                {
+                                    "error": (
+                                        "This coupon has an "
+                                        "invalid maximum "
+                                        "discount."
+                                    )
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+
+                        discount = min(
+                            discount,
+                            maximum_discount,
                         )
 
                     discount = min(
@@ -3384,9 +3595,9 @@ class CreateOrderView(APIView):
                         products_total,
                     )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # FINAL TOTAL
-            # ---------------------------------
+            # -------------------------------------------------
 
             total_amount = max(
                 Decimal("0.00"),
@@ -3395,9 +3606,9 @@ class CreateOrderView(APIView):
                 + delivery_fee,
             )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # USER
-            # ---------------------------------
+            # -------------------------------------------------
 
             user = (
                 request.user
@@ -3405,9 +3616,9 @@ class CreateOrderView(APIView):
                 else None
             )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # CREATE ORDER
-            # ---------------------------------
+            # -------------------------------------------------
 
             order = Order.objects.create(
                 user=user,
@@ -3424,15 +3635,16 @@ class CreateOrderView(APIView):
                     else None
                 ),
                 coupon=coupon,
+                discount_amount=discount,
                 delivery_fee=delivery_fee,
                 total_amount=total_amount,
                 payment_status="pending",
                 status="pending",
             )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # CREATE ORDER ITEMS
-            # ---------------------------------
+            # -------------------------------------------------
 
             for item in order_items:
 
@@ -3443,20 +3655,14 @@ class CreateOrderView(APIView):
                     quantity=item["quantity"],
                     product_price=item["unit_price"],
                     subtotal=item["subtotal"],
-                    product_name=item[
-                        "product"
-                    ].name,
-                    variant_size=item[
-                        "size"
-                    ],
-                    is_preorder=item[
-                        "is_preorder"
-                    ],
+                    product_name=item["product"].name,
+                    variant_size=item["size"],
+                    is_preorder=item["is_preorder"],
                 )
 
-            # ---------------------------------
+            # -------------------------------------------------
             # SUCCESS
-            # ---------------------------------
+            # -------------------------------------------------
 
             return Response(
                 {
@@ -3490,7 +3696,7 @@ class CreateOrderView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
+  
         
 class MyOrderListView(generics.ListAPIView):
     serializer_class = OrderSerializer
