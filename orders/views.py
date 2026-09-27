@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.http import HttpResponse
 import hashlib
+import json
 import hmac
 import uuid
 import requests
@@ -504,26 +505,52 @@ def _safe_send_email(email_function, *args):
             "EMAIL ERROR:",
             repr(exc),
         )
-
-
 def _get_payment_metadata(payment):
+    """
+    Safely extract Paystack transaction metadata.
+
+    Paystack may return metadata as:
+    - a dictionary
+    - a JSON string
+    - an empty string / None
+    """
 
     metadata = payment.get(
         "metadata",
         {}
     )
 
-    if not isinstance(metadata, dict):
-        return {}
+    if isinstance(metadata, dict):
+        return metadata
 
-    return metadata
+    if isinstance(metadata, str):
+
+        metadata = metadata.strip()
+
+        if not metadata:
+            return {}
+
+        try:
+            import json
+
+            parsed = json.loads(metadata)
+
+        except (
+            json.JSONDecodeError,
+            TypeError,
+        ):
+            return {}
+
+        if isinstance(parsed, dict):
+            return parsed
+
+    return {}
 
 
 def _payment_metadata_matches_order(
     order,
     payment,
 ):
-
     metadata = _get_payment_metadata(payment)
 
     metadata_order_id = metadata.get(
@@ -538,22 +565,31 @@ def _payment_metadata_matches_order(
         "checkout_token"
     )
 
+    # Metadata must contain all required
+    # payment-binding fields.
     if (
-        metadata_order_id is not None
-        and str(metadata_order_id) != str(order.id)
+        metadata_order_id is None
+        or metadata_order_number is None
+        or metadata_checkout_token is None
+    ):
+        return False
+
+    # Every metadata value must match
+    # the exact order being verified.
+    if (
+        str(metadata_order_id)
+        != str(order.id)
     ):
         return False
 
     if (
-        metadata_order_number is not None
-        and str(metadata_order_number)
+        str(metadata_order_number)
         != str(order.order_number)
     ):
         return False
 
     if (
-        metadata_checkout_token is not None
-        and str(metadata_checkout_token)
+        str(metadata_checkout_token)
         != str(order.checkout_token)
     ):
         return False
@@ -803,7 +839,8 @@ def _finalize_successful_payment(
             )
 
     locked_variants = {}
-    locked_products = {}
+
+    locked_products = {} 
 
        # -------------------------------------------------
     # LOCK + CHECK VARIANTS
@@ -1238,7 +1275,7 @@ def _finalize_successful_payment(
             send_stock_push_after_commit
         )
 
-        
+
     # -------------------------------------------------
     # MARK ORDER PAID
     # -------------------------------------------------
@@ -1516,13 +1553,11 @@ class InitializePaymentView(APIView):
             "currency": "NGN",
             "reference": payment_reference,
             "callback_url": callback_url,
-            "metadata": {
-                "order_id": order.id,
-                "order_number": order.order_number,
-                "checkout_token": str(
-                    order.checkout_token
-                ),
-            },
+           "metadata": json.dumps({
+    "order_id": str(order.id),
+    "order_number": str(order.order_number),
+    "checkout_token": str(order.checkout_token),
+}),
         }
 
         try:
