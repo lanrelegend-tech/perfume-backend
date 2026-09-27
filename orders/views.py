@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.conf import settings
+from django.db.models import Q
 from django.http import HttpResponse
 import hashlib
 import json
@@ -3338,21 +3339,54 @@ class CreateOrderView(APIView):
                 )
 
             else:
-
                 normalized_state = state.strip()
+                normalized_city = city.strip()
+                  
 
-                shipping_rate = (
-                    ShippingRate.objects
-                    .filter(
-                        delivery_type="state",
-                        is_active=True,
-                        state__iexact=normalized_state,
+                # -------------------------------------------------
+                # CITY RATE FIRST
+                # -------------------------------------------------
+
+                if normalized_city:
+
+                    shipping_rate = (
+                        ShippingRate.objects
+                        .filter(
+                            delivery_type="state",
+                            is_active=True,
+                            state__iexact=normalized_state,
+                            city__iexact=normalized_city,
+                        )
+                        .first()
                     )
-                    .order_by(
-                        "delivery_fee"
+
+                else:
+
+                    shipping_rate = None
+
+                # -------------------------------------------------
+                # STATE RATE FALLBACK
+                # -------------------------------------------------
+
+                if not shipping_rate:
+
+                    shipping_rate = (
+                        ShippingRate.objects
+                        .filter(
+                            delivery_type="state",
+                            is_active=True,
+                            state__iexact=normalized_state,
+                        )
+                        .filter(
+                            Q(city__isnull=True)
+                            | Q(city__exact="")
+                        )
+                        .order_by(
+                            "delivery_fee"
+                        )
+                        .first()
                     )
-                    .first()
-                )
+
 
             if not shipping_rate:
                 return Response(
