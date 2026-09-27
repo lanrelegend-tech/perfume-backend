@@ -46,14 +46,4 @@ class Migration(migrations.Migration):
             populate_product_slugs,
             migrations.RunPython.noop,
         ),
-
-        migrations.AlterField(
-            model_name="product",
-            name="slug",
-            field=models.SlugField(
-                max_length=200,
-                unique=True,
-                blank=True,
-            ),
-        ),
     ]
