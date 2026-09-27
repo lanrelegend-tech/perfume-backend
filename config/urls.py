@@ -32,14 +32,15 @@ urlpatterns = [
     path("api/wishlist/", include("wishlist.urls")),
     path("api/coupons/", include("coupons.urls")),
     path(
+    "api/notifications/",
+    include("notifications.urls"),
+),
+    path(
     "api/newsletter/",
     include("newsletter.urls"),
 ),
     path("api/shipping/", include("shipping.urls")),
-    path(
-    "api/notifications/",
-    include("notifications.urls")
-),
+   
     path(
     "api/settings/",
     include("store_settings.urls")

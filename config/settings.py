@@ -296,3 +296,11 @@ CSRF_TRUSTED_ORIGINS = [
 
 if FRONTEND_URL and FRONTEND_URL not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(FRONTEND_URL)
+
+
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_CLAIMS_EMAIL = os.getenv(
+    "VAPID_CLAIMS_EMAIL",
+    "mailto:hello@orentemist.online",
+)
