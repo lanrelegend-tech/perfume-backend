@@ -13,6 +13,108 @@ from rest_framework.views import APIView
 from .models import AdminPushSubscription, Notification
 
 
+
+def send_admin_push_notification(
+    title,
+    message,
+    url="/admin",
+    notification_type="system",
+    tag=None,
+):
+    """
+    Send a Web Push notification to every active admin
+    subscription and create an in-app Notification for
+    every admin user.
+    """
+
+    subscriptions = (
+        AdminPushSubscription.objects
+        .select_related("user")
+        .filter(
+            user__is_staff=True,
+            is_active=True,
+        )
+    )
+
+    admin_users = {}
+
+    for subscription in subscriptions:
+        admin_users[subscription.user_id] = subscription.user
+
+    for admin_user in admin_users.values():
+        Notification.objects.create(
+            user=admin_user,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+        )
+
+    payload = {
+        "title": title,
+        "body": message,
+        "url": url,
+        "tag": tag or f"orentemist-{notification_type}",
+    }
+
+    sent = 0
+    removed = 0
+
+    for subscription in subscriptions:
+        subscription_info = {
+            "endpoint": subscription.endpoint,
+            "keys": {
+                "p256dh": subscription.p256dh,
+                "auth": subscription.auth,
+            },
+        }
+
+        try:
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(payload),
+                vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                vapid_claims={
+                    "sub": settings.VAPID_CLAIMS_EMAIL,
+                },
+                ttl=60 * 60,
+            )
+
+            sent += 1
+
+        except WebPushException as exc:
+            response = getattr(exc, "response", None)
+            status_code = getattr(
+                response,
+                "status_code",
+                None,
+            )
+
+            if status_code in [404, 410]:
+                subscription.is_active = False
+
+                subscription.save(
+                    update_fields=[
+                        "is_active",
+                    ]
+                )
+
+                removed += 1
+
+            print(
+                "WEB PUSH ERROR:",
+                repr(exc),
+            )
+
+    print(
+        "ADMIN PUSH RESULT:",
+        {
+            "sent": sent,
+            "removed": removed,
+            "admins": len(admin_users),
+        },
+    )
+
+    
 class AdminPushSubscribeView(APIView):
     permission_classes = [IsAdminUser]
 

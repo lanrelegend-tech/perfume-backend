@@ -1108,6 +1108,46 @@ def _finalize_successful_payment(
         )
     )
 
+
+
+
+
+    # -------------------------------------------------
+    # ADMIN PUSH NOTIFICATION
+    # -------------------------------------------------
+
+    def send_new_order_push_after_commit():
+        try:
+            from notifications.push_views import (
+                send_admin_push_notification
+            )
+
+            send_admin_push_notification(
+                title="New Order",
+                message=(
+                    f"Order #{order.order_number} — "
+                    f"₦{order.total_amount:,.2f} from "
+                    f"{order.full_name}."
+                ),
+                url=f"/admin/orders/{order.id}",
+                notification_type="order",
+                tag=f"orentemist-new-order-{order.id}",
+            )
+
+        except Exception as exc:
+            print(
+                "ADMIN PUSH ERROR:",
+                repr(exc),
+            )
+
+    transaction.on_commit(
+        send_new_order_push_after_commit
+    )
+
+    
+
+
+
     # -------------------------------------------------
     # CLEAR AUTHENTICATED USER CART ONLY
     #
@@ -1127,6 +1167,11 @@ def _finalize_successful_payment(
             cart.items.all().delete()
 
     return True
+
+
+
+
+
 
 
 # =========================================================
