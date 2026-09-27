@@ -9,6 +9,7 @@ import requests
 from cart.models import Cart
 from products.models import ProductVariant, Product
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from django.db import transaction
 from django.db.models import Q
@@ -749,12 +750,10 @@ def _restore_order_inventory_and_coupon(order):
             )
 
 
-
 def _finalize_successful_payment(
     order,
     payment,
 ):
-
     """
     Finalize a verified Paystack payment.
 
@@ -762,26 +761,21 @@ def _finalize_successful_payment(
     with the order already locked.
     """
 
+    from rest_framework.exceptions import ValidationError
+
     # -------------------------------------------------
     # IDEMPOTENCY
     # -------------------------------------------------
 
     if order.payment_status == "paid":
-
         return False
 
     if order.payment_status == "refunded":
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "This order has already been refunded."
         )
 
     if order.status == "cancelled":
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "Cancelled orders cannot be paid."
         )
@@ -790,16 +784,20 @@ def _finalize_successful_payment(
     # PAYMENT REFERENCE
     # -------------------------------------------------
 
-    reference = payment.get(
-        "reference"
-    )
+    reference = payment.get("reference")
 
     if not reference:
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "Paystack payment reference is missing."
+        )
+
+    # -------------------------------------------------
+    # VERIFY PAYMENT REFERENCE BELONGS TO THIS ORDER
+    # -------------------------------------------------
+
+    if str(order.payment_reference) != str(reference):
+        raise ValidationError(
+            "Payment reference does not belong to this order."
         )
 
     # -------------------------------------------------
@@ -810,9 +808,6 @@ def _finalize_successful_payment(
         order,
         payment,
     ):
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "Payment metadata does not match the order."
         )
@@ -826,9 +821,6 @@ def _finalize_successful_payment(
     )
 
     if payment.get("amount") != expected_amount:
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "Payment amount does not match the order amount."
         )
@@ -838,9 +830,6 @@ def _finalize_successful_payment(
     # -------------------------------------------------
 
     if payment.get("currency") != "NGN":
-
-        from rest_framework.exceptions import ValidationError
-
         raise ValidationError(
             "Payment currency does not match the order currency."
         )
@@ -848,8 +837,9 @@ def _finalize_successful_payment(
     # -------------------------------------------------
     # AGGREGATE STOCK REQUIREMENTS
     #
-    # This prevents an order containing the same
-    # variant multiple times from overselling stock.
+    # Prevents an order containing the same
+    # variant/product multiple times from
+    # overselling stock.
     # -------------------------------------------------
 
     variant_requirements = {}
@@ -878,10 +868,9 @@ def _finalize_successful_payment(
             )
 
     locked_variants = {}
+    locked_products = {}
 
-    locked_products = {} 
-
-       # -------------------------------------------------
+    # -------------------------------------------------
     # LOCK + CHECK VARIANTS
     # -------------------------------------------------
 
@@ -902,7 +891,6 @@ def _finalize_successful_payment(
             and variant.in_stock
         )
 
-        # Find the product connected to this variant.
         product = variant.product
 
         product_stock = int(
@@ -920,8 +908,6 @@ def _finalize_successful_payment(
         if variant_has_stock:
 
             if quantity > variant_stock:
-
-                from rest_framework.exceptions import ValidationError
 
                 raise ValidationError(
                     f"Not enough stock for "
@@ -947,8 +933,6 @@ def _finalize_successful_payment(
         # -------------------------------------------------
 
         else:
-
-            from rest_framework.exceptions import ValidationError
 
             raise ValidationError(
                 f"{product.name} "
@@ -991,8 +975,6 @@ def _finalize_successful_payment(
 
             if quantity > product_stock:
 
-                from rest_framework.exceptions import ValidationError
-
                 raise ValidationError(
                     f"Not enough stock for "
                     f"{product.name}."
@@ -1016,16 +998,11 @@ def _finalize_successful_payment(
 
         else:
 
-            from rest_framework.exceptions import ValidationError
-
             raise ValidationError(
                 f"{product.name} is sold out."
             )
 
         locked_products[product_id] = product
-
-
-
 
     # -------------------------------------------------
     # REDUCE STOCK + PREPARE STOCK ALERTS
@@ -1206,11 +1183,8 @@ def _finalize_successful_payment(
 
         if (
             coupon.usage_limit is not None
-            and coupon.used_count
-            >= coupon.usage_limit
+            and coupon.used_count >= coupon.usage_limit
         ):
-
-            from rest_framework.exceptions import ValidationError
 
             raise ValidationError(
                 "This coupon has reached its usage limit."
@@ -1314,7 +1288,6 @@ def _finalize_successful_payment(
             send_stock_push_after_commit
         )
 
-
     # -------------------------------------------------
     # MARK ORDER PAID
     # -------------------------------------------------
@@ -1358,16 +1331,14 @@ def _finalize_successful_payment(
         )
     )
 
-
-
-
-
     # -------------------------------------------------
     # ADMIN PUSH NOTIFICATION
     # -------------------------------------------------
 
     def send_new_order_push_after_commit():
+
         try:
+
             from notifications.push_views import (
                 send_admin_push_notification
             )
@@ -1385,6 +1356,7 @@ def _finalize_successful_payment(
             )
 
         except Exception as exc:
+
             print(
                 "ADMIN PUSH ERROR:",
                 repr(exc),
@@ -1394,30 +1366,25 @@ def _finalize_successful_payment(
         send_new_order_push_after_commit
     )
 
-    
-
-
-
     # -------------------------------------------------
     # CLEAR AUTHENTICATED USER CART ONLY
-    #
-    # NEVER trust a client-provided guest session ID
-    # to delete another cart.
     # -------------------------------------------------
 
     if order.user:
 
         cart = (
             Cart.objects
-            .filter(user=order.user)
+            .filter(
+                user=order.user
+            )
             .first()
         )
 
         if cart:
+
             cart.items.all().delete()
 
     return True
-
 
 
 
@@ -1434,9 +1401,12 @@ class InitializePaymentView(APIView):
 
     def post(self, request, order_id):
 
-        checkout_token = request.data.get(
-            "checkout_token"
-        )
+        checkout_token = (
+            request.data.get(
+                "checkout_token"
+            )
+            or ""
+        ).strip()
 
         if not checkout_token:
 
@@ -1448,6 +1418,10 @@ class InitializePaymentView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # -------------------------------------------------
+        # FIND EXACT ORDER
+        # -------------------------------------------------
 
         try:
 
@@ -1527,10 +1501,12 @@ class InitializePaymentView(APIView):
             return Response(
                 {
                     "error": (
-                        "A payment has already been initialized "
-                        "for this order."
+                        "A payment has already been "
+                        "initialized for this order."
                     ),
-                    "reference": order.payment_reference,
+                    "reference": (
+                        order.payment_reference
+                    ),
                 },
                 status=status.HTTP_409_CONFLICT,
             )
@@ -1592,12 +1568,18 @@ class InitializePaymentView(APIView):
             "currency": "NGN",
             "reference": payment_reference,
             "callback_url": callback_url,
-           "metadata": json.dumps({
-    "order_id": str(order.id),
-    "order_number": str(order.order_number),
-    "checkout_token": str(order.checkout_token),
-}),
+            "metadata": json.dumps({
+                "order_id": str(order.id),
+                "order_number": str(order.order_number),
+                "checkout_token": str(
+                    order.checkout_token
+                ),
+            }),
         }
+
+        # -------------------------------------------------
+        # INITIALIZE WITH PAYSTACK
+        # -------------------------------------------------
 
         try:
 
@@ -1627,6 +1609,10 @@ class InitializePaymentView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        # -------------------------------------------------
+        # PAYSTACK RESPONSE
+        # -------------------------------------------------
+
         if (
             not response.ok
             or not data.get("status")
@@ -1645,16 +1631,22 @@ class InitializePaymentView(APIView):
 
         paystack_data = data["data"]
 
-        paystack_reference = paystack_data.get(
-            "reference"
+        paystack_reference = (
+            paystack_data.get(
+                "reference"
+            )
         )
 
-        access_code = paystack_data.get(
-            "access_code"
+        access_code = (
+            paystack_data.get(
+                "access_code"
+            )
         )
 
-        authorization_url = paystack_data.get(
-            "authorization_url"
+        authorization_url = (
+            paystack_data.get(
+                "authorization_url"
+            )
         )
 
         if not all([
@@ -1673,6 +1665,10 @@ class InitializePaymentView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        # -------------------------------------------------
+        # SAVE PAYMENT REFERENCE
+        # -------------------------------------------------
+
         order.payment_reference = (
             paystack_reference
         )
@@ -1687,18 +1683,20 @@ class InitializePaymentView(APIView):
             ]
         )
 
-        return Response({
-            "order_id": order.id,
-            "order_number": order.order_number,
-            "checkout_token": str(
-                order.checkout_token
-            ),
-            "reference": paystack_reference,
-            "access_code": access_code,
-            "authorization_url": authorization_url,
-        })
+        return Response(
+            {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "checkout_token": str(
+                    order.checkout_token
+                ),
+                "reference": paystack_reference,
+                "access_code": access_code,
+                "authorization_url": authorization_url,
+            }
+        )
 
-
+    
 # =========================================================
 # VERIFY PAYMENT
 # =========================================================
@@ -1711,12 +1709,16 @@ class VerifyPaymentView(APIView):
     def post(self, request):
 
         reference = (
-            request.data.get("reference")
+            request.data.get(
+                "reference"
+            )
             or ""
         ).strip()
 
         checkout_token = (
-            request.data.get("checkout_token")
+            request.data.get(
+                "checkout_token"
+            )
             or ""
         ).strip()
 
@@ -1739,66 +1741,6 @@ class VerifyPaymentView(APIView):
             )
 
         # -------------------------------------------------
-        # FIND ORDER BY CHECKOUT TOKEN
-        #
-        # Do NOT require the submitted reference to equal
-        # the current DB reference. Paystack may have a
-        # legitimate older transaction reference.
-        # -------------------------------------------------
-
-        try:
-
-            order = (
-                Order.objects
-                .select_for_update()
-                .get(
-                    checkout_token=checkout_token,
-                )
-            )
-
-        except Order.DoesNotExist:
-
-            return Response(
-                {
-                    "error": "Order not found."
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        # -------------------------------------------------
-        # IDEMPOTENCY
-        # -------------------------------------------------
-
-        if order.payment_status == "paid":
-
-            return Response({
-                "message": "Payment already verified.",
-                "order": OrderSerializer(order).data,
-            })
-
-        if order.payment_status == "refunded":
-
-            return Response(
-                {
-                    "error": (
-                        "This order has already been refunded."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if order.status == "cancelled":
-
-            return Response(
-                {
-                    "error": (
-                        "Cancelled orders cannot be paid."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
         # PAYSTACK KEY
         # -------------------------------------------------
 
@@ -1814,7 +1756,9 @@ class VerifyPaymentView(APIView):
             )
 
         # -------------------------------------------------
-        # VERIFY WITH PAYSTACK
+        # VERIFY PAYMENT DIRECTLY WITH PAYSTACK
+        #
+        # We do this BEFORE trusting the order.
         # -------------------------------------------------
 
         try:
@@ -1846,6 +1790,10 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        # -------------------------------------------------
+        # PAYSTACK RESPONSE
+        # -------------------------------------------------
+
         if (
             not response.ok
             or not data.get("status")
@@ -1865,18 +1813,50 @@ class VerifyPaymentView(APIView):
             "data",
             {}
         )
-        print("======================================")
-        print("PAYSTACK VERIFIED PAYMENT")
-        print("REFERENCE:", payment.get("reference"))
-        print("METADATA:", payment.get("metadata"))
-        print("METADATA TYPE:", type(payment.get("metadata")))
-        print("======================================")
+
+        if not isinstance(payment, dict):
+
+            return Response(
+                {
+                    "error": (
+                        "Paystack returned an invalid "
+                        "payment response."
+                    )
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        print(
+            "======================================"
+        )
+        print(
+            "PAYSTACK VERIFIED PAYMENT"
+        )
+        print(
+            "REFERENCE:",
+            payment.get("reference"),
+        )
+        print(
+            "METADATA:",
+            payment.get("metadata"),
+        )
+        print(
+            "METADATA TYPE:",
+            type(
+                payment.get("metadata")
+            ),
+        )
+        print(
+            "======================================"
+        )
 
         # -------------------------------------------------
         # VERIFY REFERENCE
         # -------------------------------------------------
 
-        if payment.get("reference") != reference:
+        if str(
+            payment.get("reference")
+        ) != str(reference):
 
             return Response(
                 {
@@ -1889,7 +1869,180 @@ class VerifyPaymentView(APIView):
             )
 
         # -------------------------------------------------
-        # VERIFY METADATA
+        # GET PAYSTACK METADATA
+        # -------------------------------------------------
+
+        metadata = _get_payment_metadata(
+            payment
+        )
+
+        metadata_order_id = (
+            metadata.get("order_id")
+        )
+
+        metadata_order_number = (
+            metadata.get("order_number")
+        )
+
+        metadata_checkout_token = (
+            metadata.get("checkout_token")
+        )
+
+        if not metadata_order_id:
+
+            return Response(
+                {
+                    "error": (
+                        "Payment is missing order metadata."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not metadata_checkout_token:
+
+            return Response(
+                {
+                    "error": (
+                        "Payment is missing checkout metadata."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # FIND ORDER USING PAYSTACK METADATA
+        #
+        # This prevents stale browser localStorage from
+        # selecting the wrong order.
+        # -------------------------------------------------
+
+        try:
+
+            order = (
+                Order.objects
+                .select_for_update()
+                .get(
+                    id=metadata_order_id,
+                    checkout_token=metadata_checkout_token,
+                )
+            )
+
+        except Order.DoesNotExist:
+
+            return Response(
+                {
+                    "error": (
+                        "The payment could not be matched "
+                        "to a valid order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY ORDER NUMBER
+        # -------------------------------------------------
+
+        if (
+            metadata_order_number
+            and str(metadata_order_number)
+            != str(order.order_number)
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Payment order metadata does not "
+                        "match the order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY BROWSER CHECKOUT TOKEN
+        #
+        # This must match the exact order resolved
+        # from Paystack metadata.
+        # -------------------------------------------------
+
+        if (
+            str(checkout_token)
+            != str(order.checkout_token)
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Checkout token does not match "
+                        "this payment."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # -------------------------------------------------
+        # VERIFY PAYMENT REFERENCE BELONGS TO ORDER
+        # -------------------------------------------------
+
+        if (
+            not order.payment_reference
+            or str(order.payment_reference)
+            != str(reference)
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Payment reference does not belong "
+                        "to this order."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # IDEMPOTENCY
+        # -------------------------------------------------
+
+        if order.payment_status == "paid":
+
+            return Response(
+                {
+                    "message": (
+                        "Payment already verified."
+                    ),
+                    "order": OrderSerializer(
+                        order
+                    ).data,
+                }
+            )
+
+        if order.payment_status == "refunded":
+
+            return Response(
+                {
+                    "error": (
+                        "This order has already been refunded."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if order.status == "cancelled":
+
+            return Response(
+                {
+                    "error": (
+                        "Cancelled orders cannot be paid."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY METADATA AGAINST LOCKED ORDER
         # -------------------------------------------------
 
         if not _payment_metadata_matches_order(
@@ -1942,7 +2095,43 @@ class VerifyPaymentView(APIView):
             )
 
         # -------------------------------------------------
-        # FINALIZE
+        # VERIFY AMOUNT
+        # -------------------------------------------------
+
+        expected_amount = int(
+            order.total_amount * 100
+        )
+
+        if payment.get("amount") != expected_amount:
+
+            return Response(
+                {
+                    "error": (
+                        "Payment amount does not match "
+                        "the order amount."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # VERIFY CURRENCY
+        # -------------------------------------------------
+
+        if payment.get("currency") != "NGN":
+
+            return Response(
+                {
+                    "error": (
+                        "Payment currency does not match "
+                        "the order currency."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # FINALIZE PAYMENT
         # -------------------------------------------------
 
         try:
@@ -1952,32 +2141,30 @@ class VerifyPaymentView(APIView):
                 payment,
             )
 
-        except Exception as exc:
+        except ValidationError as exc:
 
-            from rest_framework.exceptions import ValidationError
+            detail = exc.detail
 
-            if isinstance(
-                exc,
-                ValidationError,
-            ):
+            return Response(
+                {
+                    "error": detail
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-                detail = exc.detail
+        return Response(
+            {
+                "message": (
+                    "Payment verified successfully."
+                ),
+                "order": OrderSerializer(
+                    order
+                ).data,
+            }
+        )
 
-                return Response(
-                    {
-                        "error": detail
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
-            raise
-
-        return Response({
-            "message": (
-                "Payment verified successfully."
-            ),
-            "order": OrderSerializer(order).data,
-        })
+    
 
 
 # =========================================================
