@@ -91,7 +91,7 @@ path(
     ),
 
     path(
-        "<int:pk>/",
+        "<slug:slug>/",
         ProductDetailView.as_view(),
         name="product-detail"
     ),
