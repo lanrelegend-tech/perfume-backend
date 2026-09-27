@@ -1696,8 +1696,7 @@ class InitializePaymentView(APIView):
             }
         )
 
-    
-# =========================================================
+ # =========================================================
 # VERIFY PAYMENT
 # =========================================================
 
@@ -1715,27 +1714,11 @@ class VerifyPaymentView(APIView):
             or ""
         ).strip()
 
-        checkout_token = (
-            request.data.get(
-                "checkout_token"
-            )
-            or ""
-        ).strip()
-
         if not reference:
 
             return Response(
                 {
                     "error": "reference is required."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not checkout_token:
-
-            return Response(
-                {
-                    "error": "checkout_token is required."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -1757,8 +1740,6 @@ class VerifyPaymentView(APIView):
 
         # -------------------------------------------------
         # VERIFY PAYMENT DIRECTLY WITH PAYSTACK
-        #
-        # We do this BEFORE trusting the order.
         # -------------------------------------------------
 
         try:
@@ -1826,30 +1807,6 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        print(
-            "======================================"
-        )
-        print(
-            "PAYSTACK VERIFIED PAYMENT"
-        )
-        print(
-            "REFERENCE:",
-            payment.get("reference"),
-        )
-        print(
-            "METADATA:",
-            payment.get("metadata"),
-        )
-        print(
-            "METADATA TYPE:",
-            type(
-                payment.get("metadata")
-            ),
-        )
-        print(
-            "======================================"
-        )
-
         # -------------------------------------------------
         # VERIFY REFERENCE
         # -------------------------------------------------
@@ -1864,6 +1821,26 @@ class VerifyPaymentView(APIView):
                         "Paystack payment reference "
                         "does not match the requested reference."
                     )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # -------------------------------------------------
+        # PAYMENT MUST BE SUCCESSFUL
+        # -------------------------------------------------
+
+        payment_status = payment.get(
+            "status"
+        )
+
+        if payment_status != "success":
+
+            return Response(
+                {
+                    "error": (
+                        "Payment was not successful."
+                    ),
+                    "payment_status": payment_status,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -1888,12 +1865,27 @@ class VerifyPaymentView(APIView):
             metadata.get("checkout_token")
         )
 
+        # -------------------------------------------------
+        # METADATA MUST IDENTIFY THE ORDER
+        # -------------------------------------------------
+
         if not metadata_order_id:
 
             return Response(
                 {
                     "error": (
                         "Payment is missing order metadata."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not metadata_order_number:
+
+            return Response(
+                {
+                    "error": (
+                        "Payment is missing order number metadata."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1913,8 +1905,12 @@ class VerifyPaymentView(APIView):
         # -------------------------------------------------
         # FIND ORDER USING PAYSTACK METADATA
         #
-        # This prevents stale browser localStorage from
-        # selecting the wrong order.
+        # IMPORTANT:
+        # We do NOT use browser localStorage checkout_token
+        # to locate the order.
+        #
+        # Paystack's verified metadata identifies the
+        # exact order and exact checkout token.
         # -------------------------------------------------
 
         try:
@@ -1945,8 +1941,7 @@ class VerifyPaymentView(APIView):
         # -------------------------------------------------
 
         if (
-            metadata_order_number
-            and str(metadata_order_number)
+            str(metadata_order_number)
             != str(order.order_number)
         ):
 
@@ -1958,28 +1953,6 @@ class VerifyPaymentView(APIView):
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # VERIFY BROWSER CHECKOUT TOKEN
-        #
-        # This must match the exact order resolved
-        # from Paystack metadata.
-        # -------------------------------------------------
-
-        if (
-            str(checkout_token)
-            != str(order.checkout_token)
-        ):
-
-            return Response(
-                {
-                    "error": (
-                        "Checkout token does not match "
-                        "this payment."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
             )
 
         # -------------------------------------------------
@@ -2061,40 +2034,6 @@ class VerifyPaymentView(APIView):
             )
 
         # -------------------------------------------------
-        # VERIFY STATUS
-        # -------------------------------------------------
-
-        if payment.get("status") != "success":
-
-            payment_status = payment.get(
-                "status"
-            )
-
-            if payment_status in [
-                "failed",
-                "abandoned",
-            ]:
-
-                order.payment_status = "failed"
-
-                order.save(
-                    update_fields=[
-                        "payment_status",
-                        "updated_at",
-                    ]
-                )
-
-            return Response(
-                {
-                    "error": (
-                        "Payment was not successful."
-                    ),
-                    "payment_status": payment_status,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
         # VERIFY AMOUNT
         # -------------------------------------------------
 
@@ -2143,11 +2082,9 @@ class VerifyPaymentView(APIView):
 
         except ValidationError as exc:
 
-            detail = exc.detail
-
             return Response(
                 {
-                    "error": detail
+                    "error": exc.detail
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -2162,7 +2099,6 @@ class VerifyPaymentView(APIView):
                 ).data,
             }
         )
-
 
     
 
