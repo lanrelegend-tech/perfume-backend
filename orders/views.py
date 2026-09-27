@@ -750,6 +750,12 @@ def _restore_order_inventory_and_coupon(order):
             )
 
 
+
+
+LOW_STOCK_THRESHOLD = 3
+
+
+
 def _finalize_successful_payment(
     order,
     payment,
