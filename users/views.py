@@ -3,6 +3,8 @@ import secrets
 import resend
 
 from django.conf import settings
+from users.authentication import enforce_csrf
+from django.middleware.csrf import get_token
 from django.contrib.auth.hashers import check_password,make_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
@@ -27,6 +29,8 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 
 from orders.models import Order
 
@@ -45,6 +49,7 @@ from .serializers import (
     ResendVerificationSerializer,
     ForgotPasswordSerializer,
     ResetPasswordSerializer,
+    EmailTokenObtainPairSerializer,
 )
 
 
@@ -492,6 +497,233 @@ def send_orentemist_email(
 
 
 
+
+
+
+class CSRFTokenView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+
+        token = get_token(request)
+
+        return Response(
+            {
+                "csrfToken": token
+            },
+            status=status.HTTP_200_OK,
+        )
+
+# =========================================================
+# COOKIE JWT LOGIN
+# =========================================================
+class CookieTokenObtainPairView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        # =================================================
+        # CSRF PROTECTION
+        # =================================================
+
+        enforce_csrf(request)
+
+        serializer = EmailTokenObtainPairSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        tokens = serializer.validated_data
+
+        access_token = tokens["access"]
+        refresh_token = tokens["refresh"]
+
+        response = Response(
+            {
+                "message": "Login successful."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            path="/",
+            max_age=15 * 60,
+        )
+
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            path="/",
+            max_age=7 * 24 * 60 * 60,
+        )
+
+        return response
+
+# =========================================================
+# COOKIE JWT REFRESH
+# =========================================================
+
+class CookieTokenRefreshView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        enforce_csrf(request)
+
+        refresh_token = request.COOKIES.get(
+            "refresh_token"
+        )
+
+        if not refresh_token:
+
+            return Response(
+                {
+                    "detail":
+                        "Refresh token not found."
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+
+            refresh = RefreshToken(
+                refresh_token
+            )
+
+            # =================================================
+            # CHECK REFRESH TOKEN SESSION VERSION
+            # =================================================
+
+            user_id = refresh.get(
+                "user_id"
+            )
+
+            token_session_version = refresh.get(
+                "session_version"
+            )
+
+            if not user_id:
+
+                return Response(
+                    {
+                        "detail":
+                            "Invalid refresh token."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            if token_session_version is None:
+
+                return Response(
+                    {
+                        "detail":
+                            "Invalid session."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            try:
+
+                token_session_version = int(
+                    token_session_version
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                return Response(
+                    {
+                        "detail":
+                            "Invalid session."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            try:
+
+                profile = (
+                    CustomerProfile.objects
+                    .get(
+                        user_id=user_id
+                    )
+                )
+
+            except CustomerProfile.DoesNotExist:
+
+                return Response(
+                    {
+                        "detail":
+                            "User profile not found."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            if (
+                token_session_version
+                != profile.session_version
+            ):
+
+                return Response(
+                    {
+                        "detail":
+                            "Session has been revoked."
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            # =================================================
+            # CREATE NEW ACCESS TOKEN
+            # =================================================
+
+            access_token = str(
+                refresh.access_token
+            )
+
+        except TokenError:
+
+            return Response(
+                {
+                    "detail":
+                        "Invalid or expired refresh token."
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        response = Response(
+            {
+                "message":
+                    "Token refreshed successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="None",
+            path="/",
+            max_age=15 * 60,
+        )
+
+        return response
+    
 # =========================================================
 # REGISTER
 # =========================================================
@@ -1086,20 +1318,7 @@ class VerifyEmailLinkView(APIView):
             status=status.HTTP_200_OK,
         )
 
-    
-# =========================================================
-# RESEND VERIFICATION
-# =========================================================
-
-@method_decorator(
-    ratelimit(
-        key="ip",
-        rate="3/10m",
-        method="POST",
-        block=True
-    ),
-    name="dispatch",
-)
+ 
 
 # =========================================================
 # RESEND VERIFICATION
@@ -1866,7 +2085,6 @@ class AdminGuestCustomerListView(APIView):
             }
         )
 
-
 # =========================================================
 # LOGOUT
 # =========================================================
@@ -1883,15 +2101,22 @@ class LogoutView(APIView):
             )
         )
 
-        # Immediately invalidate all existing access tokens.
+        # =================================================
+        # IMMEDIATELY INVALIDATE ALL ACCESS TOKENS
+        # =================================================
+
         profile.session_version += 1
 
         profile.save(
-            update_fields=["session_version"]
+            update_fields=[
+                "session_version"
+            ]
         )
 
-        # Blacklist every outstanding refresh token
-        # belonging to this user.
+        # =================================================
+        # BLACKLIST ALL REFRESH TOKENS
+        # =================================================
+
         outstanding_tokens = (
             OutstandingToken.objects.filter(
                 user=request.user
@@ -1904,10 +2129,30 @@ class LogoutView(APIView):
                 token=token
             )
 
-        return Response(
+        # =================================================
+        # DELETE AUTH COOKIES
+        # =================================================
+
+        response = Response(
             {
                 "message":
                     "Logged out successfully."
             },
             status=status.HTTP_200_OK,
         )
+
+        response.delete_cookie(
+            "access_token",
+            path="/",
+            secure=True,
+            samesite="None",
+        )
+
+        response.delete_cookie(
+            "refresh_token",
+            path="/",
+            secure=True,
+            samesite="None",
+        )
+
+        return response

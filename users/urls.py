@@ -1,8 +1,7 @@
 from django.urls import path
 
 from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-    TokenObtainPairView,
+   
     TokenBlacklistView,
 )
 
@@ -21,6 +20,9 @@ from .views import (
     AdminGuestCustomerListView,
     LogoutView,
     VerifyEmailLinkView,
+    CookieTokenObtainPairView,
+    CookieTokenRefreshView,
+    CSRFTokenView,
 )
 
 urlpatterns = [
@@ -32,20 +34,21 @@ urlpatterns = [
     path(
     "verify-email-link/",
     VerifyEmailLinkView.as_view(),
-),
+    ),
 
-    path(
-        "login/",
-        TokenObtainPairView.as_view(
-            serializer_class=EmailTokenObtainPairSerializer
-        ),
-        name="token_obtain_pair",
+     path(
+    "auth/csrf/",
+    CSRFTokenView.as_view(),
     ),
 
     path(
-        "refresh/",
-        TokenRefreshView.as_view(),
-        name="token_refresh",
+    "auth/login/",
+    CookieTokenObtainPairView.as_view(),
+    ),
+
+    path(
+    "auth/refresh/",
+    CookieTokenRefreshView.as_view(),
     ),
 
     path(
