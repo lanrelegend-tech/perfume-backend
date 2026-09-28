@@ -547,7 +547,6 @@ def _get_payment_metadata(payment):
             return parsed
 
     return {}
-
 def _payment_metadata_matches_order(
     order,
     payment,
@@ -566,57 +565,6 @@ def _payment_metadata_matches_order(
         "checkout_token"
     )
 
-    order_id_matches = (
-        str(metadata_order_id)
-        == str(order.id)
-    )
-
-    order_number_matches = (
-        str(metadata_order_number)
-        == str(order.order_number)
-    )
-
-    checkout_token_matches = (
-        str(metadata_checkout_token)
-        == str(order.checkout_token)
-    )
-
-    print("======================================")
-    print("PAYMENT METADATA CHECK")
-    print(
-        "METADATA ORDER ID:",
-        metadata_order_id,
-    )
-    print(
-        "DATABASE ORDER ID:",
-        order.id,
-    )
-    print(
-        "ORDER ID MATCH:",
-        order_id_matches,
-    )
-    print(
-        "METADATA ORDER NUMBER:",
-        metadata_order_number,
-    )
-    print(
-        "DATABASE ORDER NUMBER:",
-        order.order_number,
-    )
-    print(
-        "ORDER NUMBER MATCH:",
-        order_number_matches,
-    )
-    print(
-        "CHECKOUT TOKEN MATCH:",
-        checkout_token_matches,
-    )
-    print(
-        "CHECKOUT TOKEN PRESENT:",
-        bool(metadata_checkout_token),
-    )
-    print("======================================")
-
     if not metadata_order_id:
         return False
 
@@ -626,13 +574,13 @@ def _payment_metadata_matches_order(
     if not metadata_checkout_token:
         return False
 
-    if not order_id_matches:
+    if str(metadata_order_id) != str(order.id):
         return False
 
-    if not order_number_matches:
+    if str(metadata_order_number) != str(order.order_number):
         return False
 
-    if not checkout_token_matches:
+    if str(metadata_checkout_token) != str(order.checkout_token):
         return False
 
     return True
@@ -854,6 +802,12 @@ def _finalize_successful_payment(
 
     for item in order.items.all():
 
+        # Pre-order status is captured when the
+        # OrderItem is created and must not be
+        # re-evaluated from the current product state.
+        if item.is_preorder:
+            continue
+
         if item.variant_id:
 
             variant_requirements[item.variant_id] = (
@@ -872,7 +826,7 @@ def _finalize_successful_payment(
                     0,
                 )
                 + item.quantity
-            )
+            )   
 
     locked_variants = {}
     locked_products = {}
@@ -903,11 +857,6 @@ def _finalize_successful_payment(
         product_stock = int(
             product.stock_quantity or 0
         )
-
-        product_allows_preorder = (
-            product.is_preorder is True
-        )
-
         # -------------------------------------------------
         # NORMAL PURCHASE
         # -------------------------------------------------
@@ -922,18 +871,6 @@ def _finalize_successful_payment(
                     f"({variant.size})."
                 )
 
-        # -------------------------------------------------
-        # PRE-ORDER
-        # -------------------------------------------------
-
-        elif (
-            variant_stock == 0
-            and product_stock == 0
-            and product_allows_preorder
-        ):
-
-            # Pre-orders do not consume inventory.
-            pass
 
         # -------------------------------------------------
         # SOLD OUT
@@ -970,9 +907,8 @@ def _finalize_successful_payment(
             and product.in_stock
         )
 
-        product_allows_preorder = (
-            product.is_preorder is True
-        )
+       
+        
 
         # -------------------------------------------------
         # NORMAL PURCHASE
@@ -987,17 +923,6 @@ def _finalize_successful_payment(
                     f"{product.name}."
                 )
 
-        # -------------------------------------------------
-        # PRE-ORDER
-        # -------------------------------------------------
-
-        elif (
-            product_stock == 0
-            and product_allows_preorder
-        ):
-
-            # Pre-orders do not consume inventory.
-            pass
 
         # -------------------------------------------------
         # SOLD OUT
@@ -1031,18 +956,7 @@ def _finalize_successful_payment(
 
         product = variant.product
 
-        product_stock_before = int(
-            product.stock_quantity or 0
-        )
-
-        is_preorder = (
-            variant_stock_before == 0
-            and product_stock_before == 0
-            and product.is_preorder is True
-        )
-
-        if is_preorder:
-            continue
+       
 
         variant.stock_quantity = (
             variant_stock_before - quantity
@@ -1111,13 +1025,7 @@ def _finalize_successful_payment(
             product.stock_quantity or 0
         )
 
-        is_preorder = (
-            product_stock_before == 0
-            and product.is_preorder is True
-        )
-
-        if is_preorder:
-            continue
+      
 
         product.stock_quantity = (
             product_stock_before - quantity
@@ -1452,6 +1360,25 @@ class InitializePaymentView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+
+        # -------------------------------------------------
+        # AUTHENTICATED USER OWNERSHIP CHECK
+        # -------------------------------------------------
+
+        if request.user.is_authenticated:
+
+            if order.user_id != request.user.id:
+
+                return Response(
+                    {
+                        "error": (
+                            "You are not authorized to "
+                            "pay for this order."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            
         # -------------------------------------------------
         # CANCELLED
         # -------------------------------------------------
@@ -1944,6 +1871,26 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+
+        # -------------------------------------------------
+        # AUTHENTICATED USER OWNERSHIP CHECK
+        # -------------------------------------------------
+
+        if request.user.is_authenticated:
+
+            if order.user_id != request.user.id:
+
+                return Response(
+                    {
+                        "error": (
+                            "You are not authorized to "
+                            "verify this order."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            
         # -------------------------------------------------
         # VERIFY ORDER NUMBER
         # -------------------------------------------------
@@ -2587,62 +2534,18 @@ class PaystackWebhookView(APIView):
             .first()
         )
 
-        # -------------------------------------------------
-        # FALLBACK TO METADATA
-        #
-        # This allows a legitimate Paystack payment to
-        # still resolve even if the order reference was
-        # changed before webhook processing.
-        # -------------------------------------------------
-
+       
+       
         if not order:
 
-            metadata = _get_payment_metadata(
-                payment
+            return Response(
+                {
+                    "error": "Order not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-            order_id = metadata.get(
-                "order_id"
-            )
 
-            checkout_token = metadata.get(
-                "checkout_token"
-            )
-
-            if (
-                not order_id
-                or not checkout_token
-            ):
-
-                return Response(
-                    {
-                        "error": (
-                            "Order could not be identified "
-                            "from payment metadata."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            try:
-
-                order = (
-                    Order.objects
-                    .select_for_update()
-                    .get(
-                        id=order_id,
-                        checkout_token=checkout_token,
-                    )
-                )
-
-            except Order.DoesNotExist:
-
-                return Response(
-                    {
-                        "error": "Order not found."
-                    },
-                    status=status.HTTP_404_NOT_FOUND,
-                )
 
         # -------------------------------------------------
         # IDEMPOTENCY
