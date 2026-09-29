@@ -555,7 +555,7 @@ class CookieTokenObtainPairView(APIView):
             value=access_token,
             httponly=True,
             secure=not settings.DEBUG,
-            samesite="None" if not settings.DEBUG else "Lax",
+            samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
             max_age=15 * 60,
         )
@@ -565,7 +565,7 @@ class CookieTokenObtainPairView(APIView):
             value=refresh_token,
             httponly=True,
             secure=not settings.DEBUG,
-            samesite="None" if not settings.DEBUG else "Lax",
+            samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
             max_age=7 * 24 * 60 * 60,
         )
@@ -717,7 +717,7 @@ class CookieTokenRefreshView(APIView):
             value=access_token,
             httponly=True,
             secure=not settings.DEBUG,
-            samesite="None" if not settings.DEBUG else "Lax",
+            samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
             max_age=15 * 60,
         )
@@ -753,7 +753,8 @@ class RegisterView(generics.CreateAPIView):
         )
 
         try:
-            self.perform_create(serializer)
+            with transaction.atomic():
+                self.perform_create(serializer)
 
         except Exception:
             return Response(
@@ -2139,14 +2140,14 @@ class LogoutView(APIView):
             "access_token",
             path="/",
             secure=not settings.DEBUG,
-            samesite="None" if not settings.DEBUG else "Lax",
+            samesite=settings.AUTH_COOKIE_SAMESITE,
         )
 
         response.delete_cookie(
             "refresh_token",
             path="/",
             secure=not settings.DEBUG,
-            samesite="None" if not settings.DEBUG else "Lax",
+            samesite=settings.AUTH_COOKIE_SAMESITE,
         )
 
         return response

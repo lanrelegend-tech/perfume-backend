@@ -1,3 +1,25 @@
-from django.test import TestCase
+from rest_framework.test import APITestCase
 
-# Create your tests here.
+from products.models import Product
+
+
+class ProductDetailTests(APITestCase):
+    def setUp(self):
+        self.product = Product.objects.create(
+            name="Test Fragrance",
+            brand="ORENTEMIST",
+            description="A test fragrance.",
+            price="25000.00",
+        )
+
+    def test_product_is_available_by_slug(self):
+        response = self.client.get(f"/api/products/{self.product.slug}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], self.product.id)
+
+    def test_product_is_available_by_numeric_id_for_existing_cart_links(self):
+        response = self.client.get(f"/api/products/{self.product.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], self.product.id)

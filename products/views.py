@@ -1,5 +1,6 @@
 from rest_framework import generics, status
 from rest_framework.permissions import IsAdminUser
+from django.shortcuts import get_object_or_404
 from .models import (
     Category,
     Product,
@@ -49,6 +50,18 @@ class ProductDetailView(generics.RetrieveAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     lookup_field = "slug"
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_value = self.kwargs[self.lookup_field]
+        lookup = (
+            {"pk": lookup_value}
+            if str(lookup_value).isdigit()
+            else {self.lookup_field: lookup_value}
+        )
+        obj = get_object_or_404(queryset, **lookup)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
 
 class CategoryListView(generics.ListAPIView):
@@ -462,4 +475,4 @@ class AdminLowStockView(APIView):
                     out_of_stock_variants.count()
                 ),
             },
-        })             
+        })

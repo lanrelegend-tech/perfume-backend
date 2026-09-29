@@ -43,10 +43,7 @@ BREVO_DEFAULT_SENDER_EMAIL = os.getenv(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv(
-    "DJANGO_DEBUG",
-    "True"
-).lower() == "true"
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -314,7 +311,17 @@ SECURE_SSL_REDIRECT = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 
 CSRF_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SAMESITE = "None" if not DEBUG else "Lax"
+AUTH_COOKIE_SAMESITE = os.getenv(
+    "AUTH_COOKIE_SAMESITE",
+    "Lax",
+).capitalize()
+
+if AUTH_COOKIE_SAMESITE not in {"Lax", "Strict", "None"}:
+    raise ValueError(
+        "AUTH_COOKIE_SAMESITE must be Lax, Strict, or None."
+    )
+
+CSRF_COOKIE_SAMESITE = AUTH_COOKIE_SAMESITE
 CSRF_COOKIE_HTTPONLY = False
 
 SECURE_HSTS_SECONDS = 31536000

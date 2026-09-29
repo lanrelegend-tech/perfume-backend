@@ -184,6 +184,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "is_staff",
             "first_name",
             "last_name",
         ]
@@ -192,6 +193,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "email",
+            "is_staff",
         ]
 
 
