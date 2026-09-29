@@ -285,12 +285,17 @@ CORS_ALLOW_HEADERS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-FRONTEND_URL = os.getenv("FRONTEND_URL")
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL",
+    "https://perfume-frontend-new-ashy.vercel.app",
+)
 
 if FRONTEND_URL and FRONTEND_URL not in CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "https://www.orentemist.online",
     "https://orentemist.online",
 ]
@@ -304,12 +309,12 @@ if FRONTEND_URL and FRONTEND_URL not in CSRF_TRUSTED_ORIGINS:
 # PRODUCTION SECURITY
 # =========================================================
 
-SECURE_SSL_REDIRECT = True
+SECURE_SSL_REDIRECT = not DEBUG
 
-SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = not DEBUG
 
-CSRF_COOKIE_SECURE = True
-CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "None" if not DEBUG else "Lax"
 CSRF_COOKIE_HTTPONLY = False
 
 SECURE_HSTS_SECONDS = 31536000

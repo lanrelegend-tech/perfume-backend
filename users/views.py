@@ -554,8 +554,8 @@ class CookieTokenObtainPairView(APIView):
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=True,
-            samesite="None",
+            secure=not settings.DEBUG,
+            samesite="None" if not settings.DEBUG else "Lax",
             path="/",
             max_age=15 * 60,
         )
@@ -564,8 +564,8 @@ class CookieTokenObtainPairView(APIView):
             key="refresh_token",
             value=refresh_token,
             httponly=True,
-            secure=True,
-            samesite="None",
+            secure=not settings.DEBUG,
+            samesite="None" if not settings.DEBUG else "Lax",
             path="/",
             max_age=7 * 24 * 60 * 60,
         )
@@ -716,8 +716,8 @@ class CookieTokenRefreshView(APIView):
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=True,
-            samesite="None",
+            secure=not settings.DEBUG,
+            samesite="None" if not settings.DEBUG else "Lax",
             path="/",
             max_age=15 * 60,
         )
@@ -1467,12 +1467,6 @@ class ForgotPasswordView(APIView):
         )
 
         code = reset_code.generate_code()
-        print("GENERATED RESET CODE:", code)
-        print(
-           "GENERATED CODE MATCH:",
-           check_password(code, reset_code.code)
-)
-
         try:
 
             send_orentemist_email(
@@ -2144,15 +2138,15 @@ class LogoutView(APIView):
         response.delete_cookie(
             "access_token",
             path="/",
-            secure=True,
-            samesite="None",
+            secure=not settings.DEBUG,
+            samesite="None" if not settings.DEBUG else "Lax",
         )
 
         response.delete_cookie(
             "refresh_token",
             path="/",
-            secure=True,
-            samesite="None",
+            secure=not settings.DEBUG,
+            samesite="None" if not settings.DEBUG else "Lax",
         )
 
         return response

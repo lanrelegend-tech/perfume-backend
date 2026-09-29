@@ -76,14 +76,22 @@ class Product(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.name)
+            base_slug = slugify(self.name) or "product"
+            base_slug = base_slug[:200]
+            slug = base_slug
+            suffix = 2
+
+            while Product.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                suffix_text = f"-{suffix}"
+                slug = f"{base_slug[:200 - len(suffix_text)]}{suffix_text}"
+                suffix += 1
+
+            self.slug = slug
 
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.name    
-
-    
+        return self.name
 
 
 class ProductVariant(models.Model):
@@ -154,4 +162,4 @@ class ProductImage(models.Model):
         ordering = ["-is_primary", "created_at"]
 
     def __str__(self):
-        return f"{self.product.name} image"     
+        return f"{self.product.name} image"
