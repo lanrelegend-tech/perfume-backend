@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 
 
 class Coupon(models.Model):
@@ -70,3 +71,22 @@ class Coupon(models.Model):
 
     def __str__(self):
         return self.code.upper()
+
+    def clean(self):
+        super().clean()
+
+        if self.usage_limit == 0:
+            raise ValidationError({
+                "usage_limit": (
+                    "Enter a usage limit greater than 0, or leave it blank "
+                    "for unlimited use."
+                )
+            })
+
+        if self.maximum_discount == 0:
+            raise ValidationError({
+                "maximum_discount": (
+                    "Enter a maximum discount greater than 0, or leave it "
+                    "blank for no maximum."
+                )
+            })

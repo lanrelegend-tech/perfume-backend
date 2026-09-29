@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
 from orders.models import Order
+from coupons.models import Coupon
 from products.models import Product
 from shipping.models import ShippingRate
 
@@ -70,3 +71,25 @@ class CheckoutTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         order = Order.objects.get(pk=response.data["order"]["id"])
         self.assertEqual(order.user, user)
+
+    def test_coupon_code_reduces_the_saved_order_total(self):
+        Coupon.objects.create(
+            code="SAVE10",
+            discount_type="percentage",
+            discount_value=Decimal("10.00"),
+        )
+        payload = {
+            **self.payload,
+            "coupon_code": "SAVE10",
+        }
+
+        response = self.client.post(
+            "/api/orders/create/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.get(pk=response.data["order"]["id"])
+        self.assertEqual(order.discount_amount, Decimal("2500.00"))
+        self.assertEqual(order.total_amount, Decimal("25000.00"))

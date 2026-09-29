@@ -1100,7 +1100,6 @@ def _finalize_successful_payment(
             coupon.usage_limit is not None
             and coupon.used_count >= coupon.usage_limit
         ):
-
             raise ValidationError(
                 "This coupon has reached its usage limit."
             )
@@ -3383,14 +3382,12 @@ class CreateOrderView(APIView):
 
                     if (
                         coupon.usage_limit is not None
-                        and coupon.used_count
-                        >= coupon.usage_limit
+                        and coupon.used_count >= coupon.usage_limit
                     ):
                         return Response(
                             {
                                 "error": (
-                                    "This coupon has "
-                                    "reached its usage limit."
+                                    "This coupon has reached its usage limit."
                                 )
                             },
                             status=status.HTTP_400_BAD_REQUEST,
