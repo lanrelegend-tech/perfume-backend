@@ -24,6 +24,7 @@ LOW_STOCK_THRESHOLD = 3
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
     serializer_class = ProductSerializer
+    pagination_class = None
 
     filterset_fields = [
         "category",
@@ -71,6 +72,7 @@ class CategoryListView(generics.ListAPIView):
 class AdminProductListCreateView(generics.ListCreateAPIView):
     serializer_class = AdminProductSerializer
     permission_classes = [IsAdminUser]
+    pagination_class = None
 
     def get_queryset(self):
         queryset = Product.objects.all().order_by("-created_at")

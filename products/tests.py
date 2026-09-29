@@ -23,3 +23,20 @@ class ProductDetailTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["id"], self.product.id)
+
+
+class ProductListTests(APITestCase):
+    def test_product_list_returns_products_beyond_the_default_page_size(self):
+        for index in range(13):
+            Product.objects.create(
+                name=f"Fragrance {index}",
+                brand="ORENTEMIST",
+                description="A test fragrance.",
+                price="25000.00",
+            )
+
+        response = self.client.get("/api/products/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(len(response.data), 13)
