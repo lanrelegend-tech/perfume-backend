@@ -20,6 +20,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "size",
             "price",
             "stock_quantity",
+            "preorder_reserved_quantity",
             "in_stock",
         ]
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -93,6 +94,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "fragrance_notes",
             "image",
             "stock_quantity",
+            "preorder_reserved_quantity",
 "in_stock",
 "is_preorder",
 "preorder_release_date",
@@ -121,6 +123,7 @@ class AdminProductVariantSerializer(serializers.ModelSerializer):
             "size",
             "price",
             "stock_quantity",
+            "preorder_reserved_quantity",
             "in_stock",
             "created_at",
             "updated_at",
@@ -130,6 +133,7 @@ class AdminProductVariantSerializer(serializers.ModelSerializer):
             "id",
             "product_name",
             "in_stock",
+            "preorder_reserved_quantity",
             "created_at",
             "updated_at",
         ]
@@ -156,6 +160,7 @@ class AdminProductSerializer(serializers.ModelSerializer):
             "fragrance_notes",
             "image",
             "stock_quantity",
+            "preorder_reserved_quantity",
             "in_stock",
             "featured",
             "created_at",
@@ -170,6 +175,7 @@ class AdminProductSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "in_stock",
+            "preorder_reserved_quantity",
             "created_at",
             "updated_at",
         ]
@@ -217,6 +223,7 @@ class AdminInventorySerializer(serializers.ModelSerializer):
             "category_name",
             "price",
             "stock_quantity",
+            "preorder_reserved_quantity",
             "in_stock",
             "stock_status",
             "updated_at",

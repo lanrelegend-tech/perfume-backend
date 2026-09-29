@@ -54,6 +54,7 @@ class Product(models.Model):
     )
 
     stock_quantity = models.PositiveIntegerField(default=0)
+    preorder_reserved_quantity = models.PositiveIntegerField(default=0)
 
     in_stock = models.BooleanField(default=True)
     featured = models.BooleanField(default=False)
@@ -109,6 +110,10 @@ class ProductVariant(models.Model):
     )
 
     stock_quantity = models.PositiveIntegerField(
+        default=0
+    )
+
+    preorder_reserved_quantity = models.PositiveIntegerField(
         default=0
     )
 

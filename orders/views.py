@@ -208,6 +208,7 @@ class AdminOrderDetailView(
         ):
 
             refund = None
+            refund_requested = self.request.data.get("refund")
 
             # -------------------------------------------------
             # PAID ORDER -> REFUND THROUGH PAYSTACK
@@ -216,6 +217,34 @@ class AdminOrderDetailView(
             if order.payment_status == "paid":
 
                 from rest_framework.exceptions import ValidationError
+
+                if not isinstance(refund_requested, bool):
+                    raise ValidationError({
+                        "refund": (
+                            "Choose whether this paid order should be refunded."
+                        )
+                    })
+
+                if not refund_requested:
+                    order.status = "cancelled"
+                    order.save(
+                        update_fields=[
+                            "status",
+                            "updated_at",
+                        ]
+                    )
+
+                    OrderStatusHistory.objects.create(
+                        order=order,
+                        status="cancelled",
+                        changed_by=self.request.user,
+                        note=(
+                            "Order cancelled by admin without refund; "
+                            "payment, inventory, and coupon usage were kept."
+                        ),
+                    )
+
+                    return
 
                 if not order.payment_reference:
                     raise ValidationError({
@@ -591,9 +620,8 @@ def _restore_order_inventory_and_coupon(order):
     Restore stock and coupon usage exactly once
     when an already-paid order is refunded/cancelled.
 
-    IMPORTANT:
-    Pre-order items never consumed inventory,
-    so they must NEVER restore inventory.
+    Physical stock is restored for regular items. Pre-order
+    reservations are released without changing physical stock.
     """
 
     # -------------------------------------------------
@@ -603,13 +631,45 @@ def _restore_order_inventory_and_coupon(order):
     for item in order.items.all():
 
         # -------------------------------------------------
-        # PRE-ORDER
-        #
-        # Pre-orders did not consume stock.
-        # Therefore, do NOT restore anything.
+        # PRE-ORDER RESERVATION
         # -------------------------------------------------
 
         if item.is_preorder:
+
+            if item.variant_id:
+                variant = (
+                    ProductVariant.objects
+                    .select_for_update()
+                    .get(pk=item.variant_id)
+                )
+                variant.preorder_reserved_quantity = max(
+                    int(variant.preorder_reserved_quantity or 0)
+                    - item.quantity,
+                    0,
+                )
+                variant.save(
+                    update_fields=[
+                        "preorder_reserved_quantity",
+                    ]
+                )
+
+            elif item.product_id:
+                product = (
+                    Product.objects
+                    .select_for_update()
+                    .get(pk=item.product_id)
+                )
+                product.preorder_reserved_quantity = max(
+                    int(product.preorder_reserved_quantity or 0)
+                    - item.quantity,
+                    0,
+                )
+                product.save(
+                    update_fields=[
+                        "preorder_reserved_quantity",
+                    ]
+                )
+
             continue
 
         # -------------------------------------------------
@@ -799,6 +859,8 @@ def _finalize_successful_payment(
 
     variant_requirements = {}
     product_requirements = {}
+    preorder_variant_requirements = {}
+    preorder_product_requirements = {}
 
     for item in order.items.all():
 
@@ -806,6 +868,25 @@ def _finalize_successful_payment(
         # OrderItem is created and must not be
         # re-evaluated from the current product state.
         if item.is_preorder:
+
+            if item.variant_id:
+                preorder_variant_requirements[item.variant_id] = (
+                    preorder_variant_requirements.get(
+                        item.variant_id,
+                        0,
+                    )
+                    + item.quantity
+                )
+
+            elif item.product_id:
+                preorder_product_requirements[item.product_id] = (
+                    preorder_product_requirements.get(
+                        item.product_id,
+                        0,
+                    )
+                    + item.quantity
+                )
+
             continue
 
         if item.variant_id:
@@ -1081,6 +1162,42 @@ def _finalize_successful_payment(
                 "product_id": product.id,
                 "variant_id": None,
             })
+
+    # -------------------------------------------------
+    # RECORD PRE-ORDER RESERVATIONS
+    # -------------------------------------------------
+
+    for variant_id, quantity in preorder_variant_requirements.items():
+        variant = (
+            ProductVariant.objects
+            .select_for_update()
+            .get(pk=variant_id)
+        )
+        variant.preorder_reserved_quantity = (
+            int(variant.preorder_reserved_quantity or 0)
+            + quantity
+        )
+        variant.save(
+            update_fields=[
+                "preorder_reserved_quantity",
+            ]
+        )
+
+    for product_id, quantity in preorder_product_requirements.items():
+        product = (
+            Product.objects
+            .select_for_update()
+            .get(pk=product_id)
+        )
+        product.preorder_reserved_quantity = (
+            int(product.preorder_reserved_quantity or 0)
+            + quantity
+        )
+        product.save(
+            update_fields=[
+                "preorder_reserved_quantity",
+            ]
+        )
 
     # -------------------------------------------------
     # COUPON
