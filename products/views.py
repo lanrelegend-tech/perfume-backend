@@ -1,4 +1,5 @@
 from rest_framework import generics, status
+from django.conf import settings
 from rest_framework.permissions import IsAdminUser
 from django.shortcuts import get_object_or_404
 from .models import (
@@ -19,7 +20,32 @@ from .serializers import (
 )
 
 LOW_STOCK_THRESHOLD = 3
+def purge_products_cache():
+    """Purge the public products API cache from Cloudflare."""
+    try:
+        import requests
 
+        zone_id = getattr(settings, "CLOUDFLARE_ZONE_ID", None)
+        api_token = getattr(settings, "CLOUDFLARE_API_TOKEN", None)
+
+        if not zone_id or not api_token:
+            return
+
+        requests.post(
+            f"https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache",
+            headers={
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "files": [
+                    "https://api.orentemist.online/api/products/"
+                ]
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
 
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
@@ -120,12 +146,19 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
             )
 
         return queryset
+    def perform_create(self, serializer):
+        serializer.save()
+        purge_products_cache()
+
 class AdminProductDetailView(
     generics.RetrieveUpdateDestroyAPIView
 ):
     queryset = Product.objects.all()
     serializer_class = AdminProductSerializer
     permission_classes = [IsAdminUser]
+    def perform_update(self, serializer):
+        serializer.save()
+        purge_products_cache()    
     def perform_destroy(self, instance):
         # Collect unique image names first because Product.image
         # and the primary ProductImage can point to the same
@@ -144,7 +177,8 @@ class AdminProductDetailView(
             instance.image.storage.delete(image_name)
 
         # Finally delete the product and its related database records.
-        instance.delete()    
+        instance.delete()  
+        purge_products_cache()  
 
     
         
@@ -235,6 +269,7 @@ class AdminProductImageListCreateView(generics.ListCreateAPIView):
             ).update(is_primary=False)
 
         serializer.save()
+        purge_products_cache()
 class AdminProductImageDetailView(
     generics.RetrieveDestroyAPIView
 ):
@@ -265,6 +300,7 @@ class AdminProductImageDetailView(
                 "updated_at",
             ]
         )
+        purge_products_cache()
 
         serializer = self.get_serializer(instance)
 
@@ -331,6 +367,7 @@ class AdminProductImageDetailView(
                         "updated_at",
                     ]
                 )   
+            purge_products_cache()
 class AdminProductBulkImageUploadView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -380,6 +417,7 @@ class AdminProductBulkImageUploadView(APIView):
                 has_primary = True
 
             created_images.append(product_image)
+            purge_products_cache()
 
         serializer = AdminProductImageSerializer(
             created_images,
