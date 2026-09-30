@@ -22,16 +22,26 @@ from .serializers import (
 LOW_STOCK_THRESHOLD = 3
 def purge_products_cache():
     """Purge the public products API cache from Cloudflare."""
+    import logging
+    import requests
+
+    logger = logging.getLogger(__name__)
+
+    zone_id = getattr(settings, "CLOUDFLARE_ZONE_ID", None)
+    api_token = getattr(settings, "CLOUDFLARE_API_TOKEN", None)
+
+    if not zone_id:
+        logger.error("Cloudflare purge failed: CLOUDFLARE_ZONE_ID is missing.")
+        return
+
+    if not api_token:
+        logger.error(
+            "Cloudflare purge failed: CLOUDFLARE_API_TOKEN is missing."
+        )
+        return
+
     try:
-        import requests
-
-        zone_id = getattr(settings, "CLOUDFLARE_ZONE_ID", None)
-        api_token = getattr(settings, "CLOUDFLARE_API_TOKEN", None)
-
-        if not zone_id or not api_token:
-            return
-
-        requests.post(
+        response = requests.post(
             f"https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache",
             headers={
                 "Authorization": f"Bearer {api_token}",
@@ -44,8 +54,23 @@ def purge_products_cache():
             },
             timeout=10,
         )
-    except Exception:
-        pass
+
+        if response.ok:
+            logger.info(
+                "Cloudflare products cache purged successfully."
+            )
+        else:
+            logger.error(
+                "Cloudflare cache purge failed: %s %s",
+                response.status_code,
+                response.text,
+            )
+
+    except requests.RequestException as exc:
+        logger.error(
+            "Cloudflare cache purge request failed: %s",
+            exc,
+        )
 
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
