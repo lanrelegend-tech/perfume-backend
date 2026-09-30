@@ -29,6 +29,8 @@ load_dotenv(BASE_DIR / ".env")
 # SECURITY WARNING: keep the secret key used in production secret!
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+CLOUDFLARE_ZONE_ID = os.getenv("CLOUDFLARE_ZONE_ID", "")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
