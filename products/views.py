@@ -48,10 +48,12 @@ def purge_products_cache():
                 "Content-Type": "application/json",
             },
             json={
-                "files": [
-                    "https://api.orentemist.online/api/products/"
-                ]
-            },
+
+    "purge_everything": True,
+
+},
+            
+           
             timeout=10,
         )
 
@@ -211,12 +213,22 @@ class AdminCategoryListCreateView(generics.ListCreateAPIView):
     queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminUser]
+    def perform_create(self, serializer):
+        serializer.save()
+        purge_products_cache()    
 
 
 class AdminCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
     permission_classes = [IsAdminUser]   
+    def perform_update(self, serializer):
+        serializer.save()
+        purge_products_cache()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        purge_products_cache()    
 class AdminInventoryView(generics.ListAPIView):
     serializer_class = AdminInventorySerializer
     permission_classes = [IsAdminUser]
@@ -253,6 +265,9 @@ class AdminProductVariantListCreateView(
 ):
     serializer_class = AdminProductVariantSerializer
     permission_classes = [IsAdminUser]
+    def perform_create(self, serializer):
+        serializer.save()
+        purge_products_cache()    
 
     def get_queryset(self):
         queryset = ProductVariant.objects.all().select_related(
@@ -274,7 +289,14 @@ class AdminProductVariantDetailView(
 ):
     queryset = ProductVariant.objects.all()
     serializer_class = AdminProductVariantSerializer
-    permission_classes = [IsAdminUser]   
+    permission_classes = [IsAdminUser] 
+    def perform_update(self, serializer):
+        serializer.save()
+        purge_products_cache()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        purge_products_cache()      
 
 class AdminProductImageListCreateView(generics.ListCreateAPIView):
     queryset = ProductImage.objects.select_related("product").all()
