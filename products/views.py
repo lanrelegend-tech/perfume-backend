@@ -120,12 +120,34 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
             )
 
         return queryset
-
-class AdminProductDetailView(generics.RetrieveUpdateDestroyAPIView):
+class AdminProductDetailView(
+    generics.RetrieveUpdateDestroyAPIView
+):
     queryset = Product.objects.all()
     serializer_class = AdminProductSerializer
     permission_classes = [IsAdminUser]
+    def perform_destroy(self, instance):
+        # Collect unique image names first because Product.image
+        # and the primary ProductImage can point to the same
+        # Cloudinary asset.
+        image_names = set()
 
+        if instance.image and instance.image.name:
+            image_names.add(instance.image.name)
+
+        for product_image in instance.images.all():
+            if product_image.image and product_image.image.name:
+                image_names.add(product_image.image.name)
+
+        # Delete each Cloudinary asset only once.
+        for image_name in image_names:
+            instance.image.storage.delete(image_name)
+
+        # Finally delete the product and its related database records.
+        instance.delete()    
+
+    
+        
 class AdminCategoryListCreateView(generics.ListCreateAPIView):
     queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
@@ -250,10 +272,22 @@ class AdminProductImageDetailView(
             serializer.data,
             status=status.HTTP_200_OK,
         )
+
     def perform_destroy(self, instance):
         product = instance.product
         was_primary = instance.is_primary
+        image_name = (
+            instance.image.name
+            if instance.image
+            else None
+        )
 
+        # Delete the actual Cloudinary asset before deleting
+        # the ProductImage database record.
+        if image_name:
+            instance.image.storage.delete(image_name)
+
+        # Delete the ProductImage database record.
         instance.delete()
 
         if was_primary:
@@ -264,7 +298,7 @@ class AdminProductImageDetailView(
             )
 
             if next_image:
-                # Make the next image the primary
+                # Make the next image the primary image.
                 product.images.update(
                     is_primary=False
                 )
@@ -286,6 +320,7 @@ class AdminProductImageDetailView(
                         "updated_at",
                     ]
                 )
+
             else:
                 # No images remain.
                 product.image = None
@@ -295,8 +330,7 @@ class AdminProductImageDetailView(
                         "image",
                         "updated_at",
                     ]
-                )
-    
+                )   
 class AdminProductBulkImageUploadView(APIView):
     permission_classes = [IsAdminUser]
 
