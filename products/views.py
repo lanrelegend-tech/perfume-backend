@@ -3,6 +3,7 @@ from django.conf import settings
 
 from .bulk_importer import import_products
 from .cache_utils import purge_products_cache
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAdminUser
 from django.shortcuts import get_object_or_404
 from .models import (
@@ -549,7 +550,8 @@ class AdminLowStockView(APIView):
         })
 
 class AdminProductBulkImportView(APIView):
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAdminUser]
 
     def post(self, request):
-        return import_products(request) 
+        return import_products(request)
