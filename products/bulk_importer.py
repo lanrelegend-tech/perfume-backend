@@ -15,10 +15,6 @@ from rest_framework import status
 from .models import Category, Product, ProductImage
 from .cache_utils import purge_products_cache
 
-# CHANGE THIS IMPORT TO MATCH WHERE YOUR FUNCTION CURRENTLY LIVES
-# Example:
-# from .cache_utils import purge_products_cache
-
 
 MAX_ROWS = 1000
 MAX_IMAGES_PER_PRODUCT = 20
@@ -63,10 +59,7 @@ def parse_date(value):
         return None
 
     try:
-        return datetime.strptime(
-            value,
-            "%Y-%m-%d"
-        ).date()
+        return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
         raise ValueError(
             "preorder_release_date must use YYYY-MM-DD format."
@@ -102,19 +95,17 @@ def import_products(request):
     csv_file = request.FILES.get("csv_file")
     images_zip = request.FILES.get("images_zip")
 
+    # CSV is required.
     if not csv_file:
         return Response(
             {"error": "csv_file is required."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    if not images_zip:
-        return Response(
-            {"error": "images_zip is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    if images_zip.size > MAX_ZIP_SIZE:
+    # ZIP is OPTIONAL.
+    # This prevents "images_zip is required" / None errors
+    # when importing products without images.
+    if images_zip and images_zip.size > MAX_ZIP_SIZE:
         return Response(
             {
                 "error": (
@@ -130,9 +121,7 @@ def import_products(request):
     # ---------------------------------------------------------
 
     try:
-        csv_content = csv_file.read().decode(
-            "utf-8-sig"
-        )
+        csv_content = csv_file.read().decode("utf-8-sig")
     except UnicodeDecodeError:
         return Response(
             {
@@ -197,76 +186,80 @@ def import_products(request):
     # Read ZIP safely
     # ---------------------------------------------------------
 
-    try:
-        zip_file = zipfile.ZipFile(
-            images_zip
-        )
-    except zipfile.BadZipFile:
-        return Response(
-            {"error": "Invalid ZIP file."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
+    zip_file = None
     image_files = {}
 
-    try:
-        for zip_info in zip_file.infolist():
-            if zip_info.is_dir():
-                continue
-
-            filename = zip_info.filename
-
-            # Prevent path traversal.
-            normalized_path = os.path.normpath(
-                filename
+    # ZIP is optional.
+    if images_zip:
+        try:
+            zip_file = zipfile.ZipFile(
+                images_zip
+            )
+        except zipfile.BadZipFile:
+            return Response(
+                {"error": "Invalid ZIP file."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            if (
-                normalized_path.startswith("..")
-                or os.path.isabs(normalized_path)
-                or ".." in normalized_path.split(
-                    os.sep
-                )
-            ):
-                zip_file.close()
+        try:
+            for zip_info in zip_file.infolist():
 
-                return Response(
-                    {
-                        "error": (
-                            "ZIP contains an unsafe "
-                            f"path: {filename}"
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                if zip_info.is_dir():
+                    continue
+
+                filename = zip_info.filename
+
+                # Prevent path traversal.
+                normalized_path = os.path.normpath(
+                    filename
                 )
 
-            extension = os.path.splitext(
-                filename
-            )[1].lower()
+                if (
+                    normalized_path.startswith("..")
+                    or os.path.isabs(normalized_path)
+                    or ".." in normalized_path.split(
+                        os.sep
+                    )
+                ):
+                    zip_file.close()
 
-            if extension not in ALLOWED_IMAGE_EXTENSIONS:
-                continue
+                    return Response(
+                        {
+                            "error": (
+                                "ZIP contains an unsafe "
+                                f"path: {filename}"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-            basename = os.path.basename(
-                filename
-            ).strip().lower()
+                extension = os.path.splitext(
+                    filename
+                )[1].lower()
 
-            if not basename:
-                continue
+                if extension not in ALLOWED_IMAGE_EXTENSIONS:
+                    continue
 
-            image_files[basename] = zip_info
+                basename = os.path.basename(
+                    filename
+                ).strip().lower()
 
-    except Exception:
-        zip_file.close()
+                if not basename:
+                    continue
 
-        return Response(
-            {
-                "error": (
-                    "Could not safely read the ZIP file."
-                )
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+                image_files[basename] = zip_info
+
+        except Exception:
+            zip_file.close()
+
+            return Response(
+                {
+                    "error": (
+                        "Could not safely read the ZIP file."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     # ---------------------------------------------------------
     # Import products
@@ -278,327 +271,386 @@ def import_products(request):
     errors = []
     created_products = []
 
-    for row_number, row in enumerate(
-        rows,
-        start=2
-    ):
-        try:
-            with transaction.atomic():
-                name = str(
-                    row.get("name", "")
-                ).strip()
+    try:
 
-                brand = str(
-                    row.get("brand", "")
-                ).strip()
+        for row_number, row in enumerate(
+            rows,
+            start=2
+        ):
 
-                description = str(
-                    row.get("description", "")
-                ).strip()
+            try:
 
-                price_value = str(
-                    row.get("price", "")
-                ).strip()
+                with transaction.atomic():
 
-                if not name:
-                    raise ValueError(
-                        "name is required."
-                    )
+                    name = str(
+                        row.get("name", "")
+                    ).strip()
 
-                if not brand:
-                    raise ValueError(
-                        "brand is required."
-                    )
+                    brand = str(
+                        row.get("brand", "")
+                    ).strip()
 
-                if not description:
-                    raise ValueError(
-                        "description is required."
-                    )
+                    description = str(
+                        row.get("description", "")
+                    ).strip()
 
-                if not price_value:
-                    raise ValueError(
-                        "price is required."
-                    )
+                    price_value = str(
+                        row.get("price", "")
+                    ).strip()
 
-                try:
-                    price = Decimal(
-                        price_value
-                    )
-                except (
-                    InvalidOperation,
-                    ValueError,
-                ):
-                    raise ValueError(
-                        "price must be a valid number."
-                    )
-
-                if price < 0:
-                    raise ValueError(
-                        "price cannot be negative."
-                    )
-
-                category = find_category(
-                    row.get("category")
-                )
-
-                gender = str(
-                    row.get(
-                        "gender",
-                        "unisex"
-                    )
-                ).strip().lower()
-
-                valid_genders = {
-                    choice[0]
-                    for choice in Product.GENDER_CHOICES
-                }
-
-                if gender not in valid_genders:
-                    raise ValueError(
-                        "gender must be one of: "
-                        + ", ".join(
-                            sorted(valid_genders)
+                    if not name:
+                        raise ValueError(
+                            "name is required."
                         )
+
+                    if not brand:
+                        raise ValueError(
+                            "brand is required."
+                        )
+
+                    if not description:
+                        raise ValueError(
+                            "description is required."
+                        )
+
+                    if not price_value:
+                        raise ValueError(
+                            "price is required."
+                        )
+
+                    try:
+                        price = Decimal(
+                            price_value
+                        )
+
+                    except (
+                        InvalidOperation,
+                        ValueError,
+                    ):
+                        raise ValueError(
+                            "price must be a valid number."
+                        )
+
+                    if price < 0:
+                        raise ValueError(
+                            "price cannot be negative."
+                        )
+
+                    category = find_category(
+                        row.get("category")
                     )
 
-                concentration = str(
-                    row.get(
-                        "concentration",
-                        ""
-                    )
-                ).strip().lower()
+                    # -------------------------------------------------
+                    # Gender
+                    # -------------------------------------------------
 
-                valid_concentrations = {
-                    choice[0]
-                    for choice in (
-                        Product.CONCENTRATION_CHOICES
-                    )
-                }
+                    gender = str(
+                        row.get(
+                            "gender",
+                            "unisex"
+                        )
+                    ).strip().lower()
 
-                if (
-                    concentration
-                    and concentration
-                    not in valid_concentrations
-                ):
-                    raise ValueError(
-                        "concentration must be one of: "
-                        + ", ".join(
-                            sorted(
-                                valid_concentrations
+                    valid_genders = {
+                        choice[0]
+                        for choice in Product.GENDER_CHOICES
+                    }
+
+                    if gender not in valid_genders:
+                        raise ValueError(
+                            "gender must be one of: "
+                            + ", ".join(
+                                sorted(valid_genders)
                             )
                         )
-                    )
 
-                try:
-                    stock_quantity = int(
-                        str(
-                            row.get(
-                                "stock_quantity",
-                                "0"
+                    # -------------------------------------------------
+                    # Concentration
+                    # -------------------------------------------------
+
+                    concentration = str(
+                        row.get(
+                            "concentration",
+                            ""
+                        )
+                    ).strip().lower()
+
+                    valid_concentrations = {
+                        choice[0]
+                        for choice in (
+                            Product.CONCENTRATION_CHOICES
+                        )
+                    }
+
+                    if (
+                        concentration
+                        and concentration
+                        not in valid_concentrations
+                    ):
+                        raise ValueError(
+                            "concentration must be one of: "
+                            + ", ".join(
+                                sorted(
+                                    valid_concentrations
+                                )
                             )
-                        ).strip()
-                        or "0"
-                    )
-                except ValueError:
-                    raise ValueError(
-                        "stock_quantity must be a "
-                        "whole number."
-                    )
-
-                if stock_quantity < 0:
-                    raise ValueError(
-                        "stock_quantity cannot "
-                        "be negative."
-                    )
-
-                is_preorder = parse_bool(
-                    row.get(
-                        "is_preorder"
-                    ),
-                    False,
-                )
-
-                preorder_release_date = (
-                    parse_date(
-                        row.get(
-                            "preorder_release_date"
                         )
-                    )
-                )
 
-                product = Product.objects.create(
-                    name=name,
-                    brand=brand,
-                    gender=gender,
-                    concentration=concentration,
-                    description=description,
-                    category=category,
-                    price=price,
-                    size=str(
-                        row.get(
-                            "size",
-                            ""
+                    # -------------------------------------------------
+                    # Stock
+                    # -------------------------------------------------
+
+                    try:
+                        stock_quantity = int(
+                            str(
+                                row.get(
+                                    "stock_quantity",
+                                    "0"
+                                )
+                            ).strip()
+                            or "0"
                         )
-                    ).strip(),
-                    fragrance_notes=str(
-                        row.get(
-                            "fragrance_notes",
-                            ""
+
+                    except ValueError:
+                        raise ValueError(
+                            "stock_quantity must be a "
+                            "whole number."
                         )
-                    ).strip(),
-                    stock_quantity=stock_quantity,
-                    in_stock=parse_bool(
+
+                    if stock_quantity < 0:
+                        raise ValueError(
+                            "stock_quantity cannot "
+                            "be negative."
+                        )
+
+                    # -------------------------------------------------
+                    # Preorder
+                    # -------------------------------------------------
+
+                    is_preorder = parse_bool(
                         row.get(
-                            "in_stock"
-                        ),
-                        stock_quantity > 0,
-                    ),
-                    featured=parse_bool(
-                        row.get(
-                            "featured"
+                            "is_preorder"
                         ),
                         False,
-                    ),
-                    is_preorder=is_preorder,
-                    preorder_release_date=(
-                        preorder_release_date
-                    ),
-                    preorder_message=str(
-                        row.get(
-                            "preorder_message",
-                            ""
-                        )
-                    ).strip(),
-                )
-
-                # -------------------------------------------------
-                # Images
-                # -------------------------------------------------
-
-                image_value = str(
-                    row.get(
-                        "image_files",
-                        ""
                     )
-                ).strip()
 
-                if not image_value:
+                    preorder_release_date = (
+                        parse_date(
+                            row.get(
+                                "preorder_release_date"
+                            )
+                        )
+                    )
+
+                    # -------------------------------------------------
+                    # Create product
+                    # -------------------------------------------------
+
+                    product = Product.objects.create(
+                        name=name,
+                        brand=brand,
+                        gender=gender,
+                        concentration=concentration,
+                        description=description,
+                        category=category,
+                        price=price,
+
+                        size=str(
+                            row.get(
+                                "size",
+                                ""
+                            )
+                        ).strip(),
+
+                        fragrance_notes=str(
+                            row.get(
+                                "fragrance_notes",
+                                ""
+                            )
+                        ).strip(),
+
+                        stock_quantity=stock_quantity,
+
+                        in_stock=parse_bool(
+                            row.get(
+                                "in_stock"
+                            ),
+                            stock_quantity > 0,
+                        ),
+
+                        featured=parse_bool(
+                            row.get(
+                                "featured"
+                            ),
+                            False,
+                        ),
+
+                        is_preorder=is_preorder,
+
+                        preorder_release_date=(
+                            preorder_release_date
+                        ),
+
+                        preorder_message=str(
+                            row.get(
+                                "preorder_message",
+                                ""
+                            )
+                        ).strip(),
+                    )
+
+                    # -------------------------------------------------
+                    # Images
+                    # -------------------------------------------------
+
                     image_value = str(
                         row.get(
-                            "image",
+                            "image_files",
                             ""
                         )
                     ).strip()
 
-                image_names = [
-                    item.strip()
-                    for item in image_value.split("|")
-                    if item.strip()
-                ]
-
-                if len(image_names) > MAX_IMAGES_PER_PRODUCT:
-                    raise ValueError(
-                        "A product can have a maximum "
-                        "of 20 images."
-                    )
-
-                image_errors = []
-
-                for image_index, image_name in enumerate(
-                    image_names
-                ):
-                    lookup_name = (
-                        os.path.basename(
-                            image_name
-                        ).strip().lower()
-                    )
-
-                    zip_info = image_files.get(
-                        lookup_name
-                    )
-
-                    if not zip_info:
-                        image_errors.append(
-                            f"Image '{image_name}' "
-                            "was not found in ZIP."
-                        )
-                        continue
-
-                    try:
-                        image_data = zip_file.read(
-                            zip_info
-                        )
-
-                        content = ContentFile(
-                            image_data
-                        )
-
-                        product_image = ProductImage(
-                            product=product,
-                            is_primary=(
-                                image_index == 0
-                                and not image_errors
+                    if not image_value:
+                        image_value = str(
+                            row.get(
+                                "image",
+                                ""
                             )
+                        ).strip()
+
+                    image_names = [
+                        item.strip()
+                        for item in image_value.split("|")
+                        if item.strip()
+                    ]
+
+                    if len(image_names) > MAX_IMAGES_PER_PRODUCT:
+                        raise ValueError(
+                            "A product can have a maximum "
+                            "of 20 images."
                         )
 
-                        product_image.image.save(
+                    image_errors = []
+
+                    for image_index, image_name in enumerate(
+                        image_names
+                    ):
+
+                        # CSV can contain image names,
+                        # but if no ZIP was uploaded,
+                        # report the image problem without
+                        # crashing the whole import.
+                        if not zip_file:
+                            image_errors.append(
+                                f"Image '{image_name}' "
+                                "was listed in CSV but no "
+                                "images ZIP was uploaded."
+                            )
+                            continue
+
+                        lookup_name = (
                             os.path.basename(
-                                zip_info.filename
-                            ),
-                            content,
-                            save=True,
+                                image_name
+                            ).strip().lower()
                         )
 
-                        if product_image.is_primary:
-                            product.image.name = (
-                                product_image.image.name
-                            )
-
-                            product.save(
-                                update_fields=[
-                                    "image",
-                                    "updated_at",
-                                ]
-                            )
-
-                    except Exception as exc:
-                        image_errors.append(
-                            f"Image '{image_name}' "
-                            f"failed: {exc}"
+                        zip_info = image_files.get(
+                            lookup_name
                         )
 
-                if image_errors:
-                    errors.append(
+                        if not zip_info:
+                            image_errors.append(
+                                f"Image '{image_name}' "
+                                "was not found in ZIP."
+                            )
+                            continue
+
+                        try:
+
+                            image_data = zip_file.read(
+                                zip_info
+                            )
+
+                            content = ContentFile(
+                                image_data
+                            )
+
+                            product_image = ProductImage(
+                                product=product,
+                                is_primary=(
+                                    image_index == 0
+                                    and not image_errors
+                                )
+                            )
+
+                            product_image.image.save(
+                                os.path.basename(
+                                    zip_info.filename
+                                ),
+                                content,
+                                save=True,
+                            )
+
+                            # Set first successful image
+                            # as the main Product image.
+                            if product_image.is_primary:
+
+                                product.image.name = (
+                                    product_image.image.name
+                                )
+
+                                product.save(
+                                    update_fields=[
+                                        "image",
+                                        "updated_at",
+                                    ]
+                                )
+
+                        except Exception as exc:
+
+                            image_errors.append(
+                                f"Image '{image_name}' "
+                                f"failed: {exc}"
+                            )
+
+                    # Image problems don't cancel the
+                    # entire product import.
+                    if image_errors:
+                        errors.append(
+                            {
+                                "row": row_number,
+                                "type": "image",
+                                "product": product.name,
+                                "messages": image_errors,
+                            }
+                        )
+
+                    success_count += 1
+
+                    created_products.append(
                         {
-                            "row": row_number,
-                            "type": "image",
-                            "product": product.name,
-                            "messages": image_errors,
+                            "id": product.id,
+                            "name": product.name,
+                            "slug": product.slug,
                         }
                     )
 
-                success_count += 1
+            except Exception as exc:
 
-                created_products.append(
+                failure_count += 1
+
+                errors.append(
                     {
-                        "id": product.id,
-                        "name": product.name,
-                        "slug": product.slug,
+                        "row": row_number,
+                        "type": "product",
+                        "message": str(exc),
                     }
                 )
 
-        except Exception as exc:
-            failure_count += 1
+    finally:
 
-            errors.append(
-                {
-                    "row": row_number,
-                    "type": "product",
-                    "message": str(exc),
-                }
-            )
-
-    zip_file.close()
+        if zip_file:
+            zip_file.close()
 
     # Product API is cached through Cloudflare.
     # Purge once after the entire import instead of
