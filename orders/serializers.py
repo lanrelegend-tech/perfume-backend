@@ -148,6 +148,7 @@ class AdminOrderSerializer(serializers.ModelSerializer):
             "items",
             "total_amount",
             "delivery_fee",
+            "delivery_method",
             "coupon",
             "coupon_code",
             "status",
