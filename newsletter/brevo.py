@@ -431,6 +431,29 @@ def create_brevo_html_campaign(
     )
 
 
+def upload_brevo_campaign_image(
+    image_url,
+    image_name,
+):
+    response = brevo_request(
+        "POST",
+        "/emailCampaigns/images",
+        data={
+            "imageUrl": image_url,
+            "name": image_name,
+        },
+    )
+
+    hosted_url = response.get("url")
+
+    if not hosted_url:
+        raise RuntimeError(
+            "Brevo did not return a newsletter image URL."
+        )
+
+    return hosted_url
+
+
 def update_brevo_campaign_recipients(
     campaign_id,
     list_ids,

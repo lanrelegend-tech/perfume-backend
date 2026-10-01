@@ -1,4 +1,5 @@
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from django.conf import settings
 
 from .bulk_importer import import_products
@@ -24,6 +25,20 @@ from .serializers import (
 )
 
 LOW_STOCK_THRESHOLD = 3
+MAX_IMAGES_PER_PRODUCT = 4
+
+
+def get_product_image_count(product):
+    image_names = {
+        product_image.image.name
+        for product_image in product.images.all()
+        if product_image.image and product_image.image.name
+    }
+
+    if product.image and product.image.name:
+        image_names.add(product.image.name)
+
+    return len(image_names)
 
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
@@ -261,6 +276,11 @@ class AdminProductImageListCreateView(generics.ListCreateAPIView):
             False
         )
 
+        if get_product_image_count(product) >= MAX_IMAGES_PER_PRODUCT:
+            raise ValidationError({
+                "image": "A product can have a maximum of 4 images."
+            })
+
         if is_primary:
             ProductImage.objects.filter(
                 product=product
@@ -395,11 +415,27 @@ class AdminProductBulkImageUploadView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        available_slots = (
+            MAX_IMAGES_PER_PRODUCT
+            - get_product_image_count(product)
+        )
+
+        if len(images) > available_slots:
+            return Response(
+                {
+                    "error": (
+                        "A product can have a maximum of 4 images."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         created_images = []
 
         has_primary = product.images.filter(
             is_primary=True
         ).exists()
+        primary_image = None
 
         for index, image in enumerate(images):
             product_image = ProductImage.objects.create(
@@ -413,9 +449,20 @@ class AdminProductBulkImageUploadView(APIView):
 
             if product_image.is_primary:
                 has_primary = True
+                primary_image = product_image
 
             created_images.append(product_image)
-            purge_products_cache()
+
+        if primary_image:
+            product.image.name = primary_image.image.name
+            product.save(
+                update_fields=[
+                    "image",
+                    "updated_at",
+                ]
+            )
+
+        purge_products_cache()
 
         serializer = AdminProductImageSerializer(
             created_images,

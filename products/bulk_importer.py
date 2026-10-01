@@ -17,7 +17,7 @@ from .cache_utils import purge_products_cache
 
 
 MAX_ROWS = 1000
-MAX_IMAGES_PER_PRODUCT = 20
+MAX_IMAGES_PER_PRODUCT = 4
 MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100 MB
 
 ALLOWED_IMAGE_EXTENSIONS = {
@@ -94,6 +94,7 @@ def find_category(value):
 def import_products(request):
     csv_file = request.FILES.get("csv_file")
     images_zip = request.FILES.get("images_zip")
+    uploaded_images = request.FILES.getlist("images")
 
     # CSV is required.
     if not csv_file:
@@ -188,6 +189,26 @@ def import_products(request):
 
     zip_file = None
     image_files = {}
+    uploaded_image_files = {}
+
+    for uploaded_image in uploaded_images:
+        filename = uploaded_image.name
+        extension = os.path.splitext(filename)[1].lower()
+
+        if extension not in ALLOWED_IMAGE_EXTENSIONS:
+            return Response(
+                {
+                    "error": (
+                        f"Unsupported image type: {filename}"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        basename = os.path.basename(filename).strip().lower()
+
+        if basename:
+            uploaded_image_files[basename] = uploaded_image
 
     # ZIP is optional.
     if images_zip:
@@ -341,62 +362,6 @@ def import_products(request):
                     )
 
                     # -------------------------------------------------
-                    # Gender
-                    # -------------------------------------------------
-
-                    gender = str(
-                        row.get(
-                            "gender",
-                            "unisex"
-                        )
-                    ).strip().lower()
-
-                    valid_genders = {
-                        choice[0]
-                        for choice in Product.GENDER_CHOICES
-                    }
-
-                    if gender not in valid_genders:
-                        raise ValueError(
-                            "gender must be one of: "
-                            + ", ".join(
-                                sorted(valid_genders)
-                            )
-                        )
-
-                    # -------------------------------------------------
-                    # Concentration
-                    # -------------------------------------------------
-
-                    concentration = str(
-                        row.get(
-                            "concentration",
-                            ""
-                        )
-                    ).strip().lower()
-
-                    valid_concentrations = {
-                        choice[0]
-                        for choice in (
-                            Product.CONCENTRATION_CHOICES
-                        )
-                    }
-
-                    if (
-                        concentration
-                        and concentration
-                        not in valid_concentrations
-                    ):
-                        raise ValueError(
-                            "concentration must be one of: "
-                            + ", ".join(
-                                sorted(
-                                    valid_concentrations
-                                )
-                            )
-                        )
-
-                    # -------------------------------------------------
                     # Stock
                     # -------------------------------------------------
 
@@ -449,8 +414,6 @@ def import_products(request):
                     product = Product.objects.create(
                         name=name,
                         brand=brand,
-                        gender=gender,
-                        concentration=concentration,
                         description=description,
                         category=category,
                         price=price,
@@ -527,69 +490,62 @@ def import_products(request):
                     if len(image_names) > MAX_IMAGES_PER_PRODUCT:
                         raise ValueError(
                             "A product can have a maximum "
-                            "of 20 images."
+                            "of 4 images."
                         )
 
                     image_errors = []
+                    has_primary_image = False
 
-                    for image_index, image_name in enumerate(
-                        image_names
-                    ):
-
-                        # CSV can contain image names,
-                        # but if no ZIP was uploaded,
-                        # report the image problem without
-                        # crashing the whole import.
-                        if not zip_file:
-                            image_errors.append(
-                                f"Image '{image_name}' "
-                                "was listed in CSV but no "
-                                "images ZIP was uploaded."
-                            )
-                            continue
+                    for image_name in image_names:
 
                         lookup_name = (
-                            os.path.basename(
-                                image_name
-                            ).strip().lower()
+                            os.path.basename(image_name)
+                            .strip()
+                            .lower()
                         )
 
-                        zip_info = image_files.get(
+                        # Image names in the CSV can be resolved from
+                        # an attached image or from the optional ZIP.
+                        uploaded_image = uploaded_image_files.get(
                             lookup_name
                         )
+                        zip_info = image_files.get(lookup_name)
 
-                        if not zip_info:
+                        if not uploaded_image and not zip_info:
                             image_errors.append(
                                 f"Image '{image_name}' "
-                                "was not found in ZIP."
+                                "was not attached or found in ZIP."
                             )
                             continue
 
                         try:
-
-                            image_data = zip_file.read(
-                                zip_info
-                            )
-
-                            content = ContentFile(
-                                image_data
-                            )
+                            if uploaded_image:
+                                filename = os.path.basename(
+                                    uploaded_image.name
+                                )
+                                content = ContentFile(
+                                    uploaded_image.read()
+                                )
+                            else:
+                                filename = os.path.basename(
+                                    zip_info.filename
+                                )
+                                content = ContentFile(
+                                    zip_file.read(zip_info)
+                                )
 
                             product_image = ProductImage(
                                 product=product,
-                                is_primary=(
-                                    image_index == 0
-                                    and not image_errors
-                                )
+                                is_primary=not has_primary_image,
                             )
 
                             product_image.image.save(
-                                os.path.basename(
-                                    zip_info.filename
-                                ),
+                                filename,
                                 content,
                                 save=True,
                             )
+
+                            has_primary_image = True
 
                             # Set first successful image
                             # as the main Product image.
