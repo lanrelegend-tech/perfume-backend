@@ -15,6 +15,8 @@ from .views import (
     AdminProductImageDetailView,
     AdminProductBulkImageUploadView,
     AdminLowStockView,
+    AdminProductBulkImportView,
+   
 
     )
 
@@ -101,4 +103,9 @@ path(
         ProductListView.as_view(),
         name="product-list"
     ),
+    path(
+    "admin/bulk-import/",
+    AdminProductBulkImportView.as_view(),
+    name="admin-bulk-product-import",
+),
 ]
