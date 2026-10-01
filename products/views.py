@@ -550,7 +550,7 @@ class AdminLowStockView(APIView):
         })
 
 class AdminProductBulkImportView(APIView):
-    authentication_classes = [JWTAuthentication]
+   
     permission_classes = [IsAdminUser]
 
     def post(self, request):
