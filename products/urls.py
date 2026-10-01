@@ -35,6 +35,11 @@ urlpatterns = [
         name="admin-category-list-create"
     ),
     path(
+    "admin/bulk-import/",
+    AdminProductBulkImportView.as_view(),
+    name="admin-bulk-product-import",
+),
+    path(
     "admin/inventory/",
     AdminInventoryView.as_view(),
     name="admin-inventory"
@@ -103,9 +108,5 @@ path(
         ProductListView.as_view(),
         name="product-list"
     ),
-    path(
-    "admin/bulk-import/",
-    AdminProductBulkImportView.as_view(),
-    name="admin-bulk-product-import",
-),
+    
 ]
