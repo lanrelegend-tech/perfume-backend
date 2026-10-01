@@ -658,12 +658,29 @@ def import_products(request):
     if success_count:
         purge_products_cache()
 
-    return Response(
+    if success_count == 0 and failure_count > 0:
+       return Response(
         {
-            "success_count": success_count,
+            "success": False,
+            "success_count": 0,
             "failure_count": failure_count,
             "errors": errors,
-            "created_products": created_products,
+            "created_products": [],
         },
-        status=status.HTTP_201_CREATED,
+        status=status.HTTP_400_BAD_REQUEST,
     )
+
+    return Response(
+    {
+        "success": True,
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "errors": errors,
+        "created_products": created_products,
+    },
+    status=(
+        status.HTTP_201_CREATED
+        if failure_count == 0
+        else status.HTTP_207_MULTI_STATUS
+    ),
+)
