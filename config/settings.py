@@ -16,6 +16,8 @@ import os
 from corsheaders.defaults import default_headers
 
 from dotenv import load_dotenv
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -303,7 +305,14 @@ if FRONTEND_URL and FRONTEND_URL not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append(FRONTEND_URL)
 
 
-
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    integrations=[
+        DjangoIntegration(),
+    ],
+    traces_sample_rate=0.1,
+    send_default_pii=False,
+)
 # =========================================================
 # PRODUCTION SECURITY
 # =========================================================
