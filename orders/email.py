@@ -233,11 +233,38 @@ def send_orentemist_email(
     footer_message=None,
     details=None,
     items=None,
+    coupon_discount=None,
+     coupon_code=None,
 ):
     footer = footer_message or (
         "If you have any questions, please contact "
         "ORENTEMIST Customer Support."
     )
+
+        # =====================================================
+    # COUPON
+    # =====================================================
+
+    if coupon_code:
+        coupon_detail = (
+            "Coupon",
+            str(coupon_code),
+        )
+
+        if details is None:
+            details = []
+        else:
+            details = list(details)
+
+        details.append(coupon_detail)
+
+        if coupon_discount is not None:
+            details.append(
+                (
+                    "Coupon Discount",
+                    f"₦{float(coupon_discount):,.2f}",
+                )
+            )
 
     details_html = ""
 
@@ -1004,6 +1031,22 @@ def send_order_confirmation_email(order):
             else "Shipping address was not provided.",
         )
 
+
+        coupon_code = (
+             getattr(order, "coupon_code", None)
+             or getattr(
+                getattr(order, "coupon", None),
+               "code",
+               None,
+        )
+    )
+
+        coupon_discount = getattr(
+        order,
+        "discount_amount",
+        None,
+    )
+
     return send_orentemist_email(
         to_email=order.email,
 
@@ -1030,6 +1073,8 @@ def send_order_confirmation_email(order):
         ),
 
         items=order.items.all(),
+        coupon_code=coupon_code,
+        coupon_discount=coupon_discount,
 
         details=[
             (
@@ -1089,6 +1134,25 @@ def send_order_shipped_email(order):
         else "there"
     )
 
+
+
+    coupon_code = (
+         getattr(order, "coupon_code", None)
+         or getattr(
+            getattr(order, "coupon", None),
+            "code",
+            None,
+        )
+    )
+
+    coupon_discount = getattr(
+        order,
+        "discount_amount",
+        None,
+    )
+
+    
+
     # -----------------------------------------------------
     # PICKUP
     # -----------------------------------------------------
@@ -1131,6 +1195,8 @@ def send_order_shipped_email(order):
             ),
 
             items=order.items.all(),
+            coupon_code=coupon_code,
+            coupon_discount=coupon_discount,
 
             details=[
                 (
@@ -1190,6 +1256,8 @@ def send_order_shipped_email(order):
         ),
 
         items=order.items.all(),
+        coupon_code=coupon_code,
+        coupon_discount=coupon_discount,
 
         details=[
             (
@@ -1230,6 +1298,23 @@ def send_order_delivered_email(order):
         order.full_name.split()[0]
         if order.full_name
         else "there"
+    )
+
+
+
+    coupon_code = (
+        getattr(order, "coupon_code", None)
+        or getattr(
+            getattr(order, "coupon", None),
+            "code",
+            None,
+        )
+    )
+
+    coupon_discount = getattr(
+        order,
+        "discount_amount",
+        None,
     )
 
     # -----------------------------------------------------
@@ -1275,6 +1360,8 @@ def send_order_delivered_email(order):
             ),
 
             items=order.items.all(),
+            coupon_code=coupon_code,
+            coupon_discount=coupon_discount,            
 
             details=[
                 (
@@ -1330,6 +1417,8 @@ def send_order_delivered_email(order):
         ),
 
         items=order.items.all(),
+        coupon_code=coupon_code,
+        coupon_discount=coupon_discount,        
 
         details=[
             (
@@ -1374,6 +1463,20 @@ def send_order_refund_email(order, refund):
         if order.full_name
         else "there"
     )
+    coupon_code = (
+        getattr(order, "coupon_code", None)
+        or getattr(
+            getattr(order, "coupon", None),
+            "code",
+            None,
+        )
+    )
+
+    coupon_discount = getattr(
+        order,
+        "discount_amount",
+        None,
+    )    
 
     is_pickup = (
         getattr(
@@ -1435,6 +1538,8 @@ def send_order_refund_email(order, refund):
         ),
 
         items=order.items.all(),
+        coupon_code=coupon_code,
+        coupon_discount=coupon_discount,        
 
         details=[
             (
