@@ -836,6 +836,26 @@ class RegisterView(generics.CreateAPIView):
 # =========================================================
 # VERIFY EMAIL
 # =========================================================
+def claim_guest_orders_for_user(user):
+    """
+    Attach existing guest orders with the same verified email
+    address to the newly verified user account.
+    """
+
+    if not user.email:
+        return 0
+
+    updated_count = (
+        Order.objects
+        .filter(
+            user__isnull=True,
+            email__iexact=user.email.strip(),
+        )
+        .update(user=user)
+    )
+
+    return updated_count
+
 
 @method_decorator(
     ratelimit(
@@ -978,12 +998,9 @@ class VerifyEmailView(APIView):
             update_fields=["verified_at"]
         )
 
-        Order.objects.filter(
-            user__isnull=True,
-            email__iexact=user.email
-        ).update(
-            user=user
-        )
+        claim_guest_orders_for_user(user)
+
+       
 
         return Response(
             {
@@ -1304,12 +1321,7 @@ class VerifyEmailLinkView(APIView):
             ]
         )
 
-        Order.objects.filter(
-            user__isnull=True,
-            email__iexact=user.email
-        ).update(
-            user=user
-        )
+        claim_guest_orders_for_user(user)
 
         return Response(
             {
@@ -2139,14 +2151,14 @@ class LogoutView(APIView):
         response.delete_cookie(
             "access_token",
             path="/",
-            secure=not settings.DEBUG,
+          
             samesite=settings.AUTH_COOKIE_SAMESITE,
         )
 
         response.delete_cookie(
             "refresh_token",
             path="/",
-            secure=not settings.DEBUG,
+         
             samesite=settings.AUTH_COOKIE_SAMESITE,
         )
 
