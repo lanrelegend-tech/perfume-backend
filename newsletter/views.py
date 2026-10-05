@@ -2283,11 +2283,15 @@ class NewsletterCampaignSendDraftView(
 
 
 
+# =========================================================
+# IMAGE UPLOAD
+# =========================================================
 
 class NewsletterImageUploadView(APIView):
     permission_classes = [IsAdminUser]
 
     MAX_IMAGE_SIZE = 2 * 1024 * 1024
+
     ALLOWED_IMAGE_EXTENSIONS = {
         ".jpg",
         ".jpeg",
@@ -2301,17 +2305,22 @@ class NewsletterImageUploadView(APIView):
 
         if not image:
             return Response(
-                {"error": "Image file is required."},
+                {
+                    "error": "Image file is required."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        extension = os.path.splitext(image.name)[1].lower()
+        extension = os.path.splitext(
+            image.name
+        )[1].lower()
 
         if extension not in self.ALLOWED_IMAGE_EXTENSIONS:
             return Response(
                 {
                     "error": (
-                        "Newsletter images must be JPG, PNG, GIF, or BMP."
+                        "Newsletter images must be "
+                        "JPG, PNG, GIF, or BMP."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -2321,30 +2330,76 @@ class NewsletterImageUploadView(APIView):
             return Response(
                 {
                     "error": (
-                        "Newsletter images must be 2 MB or smaller."
+                        "Newsletter images must be "
+                        "2 MB or smaller."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        filename = None
-
         try:
+            # Save the image using the configured
+            # default storage (Cloudinary).
             filename = default_storage.save(
                 f"newsletter/{image.name}",
                 image,
             )
 
-            temporary_url = default_storage.url(filename)
-            image_url = upload_brevo_campaign_image(
-                temporary_url,
-                os.path.basename(image.name),
+            # Get the public Cloudinary URL.
+            image_url = default_storage.url(
+                filename
             )
+
+            if not image_url:
+                raise RuntimeError(
+                    "Image storage did not return "
+                    "a public URL."
+                )
+
+            # Brevo needs a publicly accessible image
+            # URL with a recognizable image extension.
+            image_url_lower = (
+                image_url
+                .lower()
+                .split("?", 1)[0]
+            )
+
+            stored_extension = os.path.splitext(
+                image_url_lower
+            )[1]
+
+            if (
+                stored_extension
+                not in self.ALLOWED_IMAGE_EXTENSIONS
+            ):
+                raise RuntimeError(
+                    "Uploaded image URL does not "
+                    "contain a valid image format. "
+                    f"URL returned by storage: "
+                    f"{image_url}"
+                )
+
+            # Import the Cloudinary image into Brevo.
+            brevo_image_url = (
+                upload_brevo_campaign_image(
+                    image_url,
+                    os.path.basename(
+                        filename
+                    ),
+                )
+            )
+
+            if not brevo_image_url:
+                raise RuntimeError(
+                    "Brevo did not return "
+                    "an image URL."
+                )
 
             return Response(
                 {
-                    "url": image_url,
+                    "url": brevo_image_url,
                     "filename": filename,
+                    "storage_url": image_url,
                 },
                 status=status.HTTP_201_CREATED,
             )
@@ -2352,20 +2407,14 @@ class NewsletterImageUploadView(APIView):
         except Exception as error:
             return Response(
                 {
-                    "error": "Unable to upload newsletter image.",
+                    "error": (
+                        "Unable to upload "
+                        "newsletter image."
+                    ),
                     "message": str(error),
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        finally:
-            if filename:
-                try:
-                    default_storage.delete(filename)
-                except Exception:
-                    pass
-
-        
 # =========================================================
 # TEST EMAIL
 # =========================================================
