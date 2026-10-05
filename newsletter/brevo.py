@@ -435,12 +435,65 @@ def upload_brevo_campaign_image(
     image_url,
     image_name,
 ):
+    # Make sure Brevo receives a URL with a recognizable
+    # image extension.
+    clean_url = image_url.split("?", 1)[0]
+
+    extension = ""
+
+    if "." in clean_url:
+        extension = (
+            clean_url.rsplit(".", 1)[1]
+            .lower()
+        )
+
+    allowed_extensions = {
+        "jpg": "jpg",
+        "jpeg": "jpg",
+        "png": "png",
+        "gif": "gif",
+        "bmp": "bmp",
+    }
+
+    # If Cloudinary's URL does not contain an extension,
+    # use the extension from the original filename.
+    if extension not in allowed_extensions:
+        original_extension = ""
+
+        if "." in image_name:
+            original_extension = (
+                image_name
+                .rsplit(".", 1)[1]
+                .lower()
+            )
+
+        extension = allowed_extensions.get(
+            original_extension
+        )
+
+    if not extension:
+        raise RuntimeError(
+            "Unable to determine a valid image format "
+            "for the newsletter image."
+        )
+
+    # Make sure the filename sent to Brevo has the
+    # correct image extension.
+    base_name = image_name.rsplit(
+        ".",
+        1,
+    )[0]
+
+    brevo_image_name = (
+        f"{base_name}.{extension}"
+    )
+
     response = brevo_request(
         "POST",
         "/emailCampaigns/images",
         data={
             "imageUrl": image_url,
-            "name": image_name,
+            "name": brevo_image_name,
         },
     )
 
@@ -452,7 +505,6 @@ def upload_brevo_campaign_image(
         )
 
     return hosted_url
-
 
 def update_brevo_campaign_recipients(
     campaign_id,
