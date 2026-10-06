@@ -72,7 +72,7 @@ class AdminOrderListView(generics.ListAPIView):
     ]
 
     def get_queryset(self):
-        return (
+        queryset = (
             Order.objects
             .all()
             .select_related(
@@ -85,6 +85,15 @@ class AdminOrderListView(generics.ListAPIView):
             )
             .order_by("-created_at")
         )
+
+        product = self.request.query_params.get("product")
+
+        if product:
+            queryset = queryset.filter(
+                items__product_id=product
+            ).distinct()
+
+        return queryset
 class AdminOrderDetailView(
     generics.RetrieveUpdateAPIView
 ):
