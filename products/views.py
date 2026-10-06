@@ -6,6 +6,7 @@ from .bulk_importer import import_products
 from .cache_utils import purge_products_cache
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAdminUser
+from django.db.models import Avg, Count
 from django.shortcuts import get_object_or_404
 from .models import (
     Category,
@@ -28,6 +29,24 @@ LOW_STOCK_THRESHOLD = 3
 MAX_IMAGES_PER_PRODUCT = 4
 
 
+def optimized_product_queryset():
+    return (
+        Product.objects
+        .select_related("category")
+        .prefetch_related(
+            "variants",
+            "images",
+        )
+        .annotate(
+            annotated_average_rating=Avg("reviews__rating"),
+            annotated_review_count=Count(
+                "reviews",
+                distinct=True,
+            ),
+        )
+    )
+
+
 def get_product_image_count(product):
     image_names = {
         product_image.image.name
@@ -41,9 +60,8 @@ def get_product_image_count(product):
     return len(image_names)
 
 class ProductListView(generics.ListAPIView):
-    queryset = Product.objects.all().order_by("-created_at")
+    queryset = optimized_product_queryset().order_by("-created_at")
     serializer_class = ProductSerializer
-    pagination_class = None
 
     filterset_fields = [
         "category",
@@ -67,7 +85,7 @@ class ProductListView(generics.ListAPIView):
     ]
 
 class ProductDetailView(generics.RetrieveAPIView):
-    queryset = Product.objects.all()
+    queryset = optimized_product_queryset()
     serializer_class = ProductSerializer
     lookup_field = "slug"
 

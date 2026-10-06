@@ -71,13 +71,29 @@ class ProductSerializer(serializers.ModelSerializer):
     )
 
     def get_average_rating(self, obj):
-        result = obj.reviews.aggregate(
-            average=Avg("rating")
-        )
+        if hasattr(obj, "annotated_average_rating"):
+            average = obj.annotated_average_rating
+        else:
+            average = (
+                obj.reviews
+                .aggregate(
+                    average=Avg("rating")
+                )
+                ["average"]
+            )
 
-        return round(result["average"], 1) if result["average"] else 0
+        return round(average, 1) if average else 0
 
     def get_review_count(self, obj):
+        count = getattr(
+            obj,
+            "annotated_review_count",
+            None,
+        )
+
+        if count is not None:
+            return count
+
         return obj.reviews.count()
 
     class Meta:
