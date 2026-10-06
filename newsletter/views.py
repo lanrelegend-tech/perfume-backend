@@ -2298,6 +2298,7 @@ class NewsletterImageUploadView(APIView):
         ".png",
         ".gif",
         ".bmp",
+        ".webp",
     }
 
     def post(self, request):
@@ -2320,7 +2321,7 @@ class NewsletterImageUploadView(APIView):
                 {
                     "error": (
                         "Newsletter images must be "
-                        "JPG, PNG, GIF, or BMP."
+                        "JPG, PNG, GIF, BMP, or WEBP."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -2738,4 +2739,3 @@ class NewsletterCampaignRefreshView(
             return brevo_error_response(
                 error
             )
-

@@ -557,7 +557,7 @@ class CookieTokenObtainPairView(APIView):
             secure=not settings.DEBUG,
             samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
-            max_age=15 * 60,
+            max_age=24 * 60 * 60,
         )
 
         response.set_cookie(
@@ -567,7 +567,7 @@ class CookieTokenObtainPairView(APIView):
             secure=not settings.DEBUG,
             samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
-            max_age=7 * 24 * 60 * 60,
+            max_age=30 * 24 * 60 * 60,
         )
 
         return response
@@ -719,7 +719,7 @@ class CookieTokenRefreshView(APIView):
             secure=not settings.DEBUG,
             samesite=settings.AUTH_COOKIE_SAMESITE,
             path="/",
-            max_age=15 * 60,
+            max_age=24 * 60 * 60,
         )
 
         return response

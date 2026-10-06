@@ -95,6 +95,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    "store_settings.middleware.MaintenanceModeMiddleware",
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -324,7 +325,7 @@ SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 AUTH_COOKIE_SAMESITE = os.getenv(
     "AUTH_COOKIE_SAMESITE",
-    "Lax",
+    "None",
 ).capitalize()
 
 if AUTH_COOKIE_SAMESITE not in {"Lax", "Strict", "None"}:
