@@ -39,16 +39,18 @@ def get_product_image_count(product):
         image_names.add(product.image.name)
 
     return len(image_names)
+
 class ProductListView(generics.ListAPIView):
     queryset = Product.objects.all().order_by("-created_at")
     serializer_class = ProductSerializer
+    pagination_class = None
 
     filterset_fields = [
         "category",
         "brand",
         "in_stock",
         "featured",
-        "is_preorder",
+         "is_preorder",
     ]
 
     search_fields = [
@@ -62,39 +64,7 @@ class ProductListView(generics.ListAPIView):
         "price",
         "created_at",
         "name",
-        "featured",
     ]
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        stock_status = self.request.query_params.get(
-            "stock_status"
-        )
-
-        if stock_status == "in_stock":
-            queryset = queryset.filter(
-                stock_quantity__gt=10
-            )
-
-        elif stock_status == "low_stock":
-            queryset = queryset.filter(
-                stock_quantity__gt=0,
-                stock_quantity__lte=10,
-            )
-
-        elif stock_status == "preorder":
-            queryset = queryset.filter(
-                stock_quantity=0,
-                is_preorder=True,
-            )
-
-        elif stock_status == "sold_out":
-            queryset = queryset.filter(
-                stock_quantity=0,
-                is_preorder=False,
-            )
-
-        return queryset
 
 class ProductDetailView(generics.RetrieveAPIView):
     queryset = Product.objects.all()
@@ -121,6 +91,7 @@ class CategoryListView(generics.ListAPIView):
 class AdminProductListCreateView(generics.ListCreateAPIView):
     serializer_class = AdminProductSerializer
     permission_classes = [IsAdminUser]
+    pagination_class = None
 
     def get_queryset(self):
         queryset = Product.objects.all().order_by("-created_at")
@@ -130,7 +101,6 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
         in_stock = self.request.query_params.get("in_stock")
         featured = self.request.query_params.get("featured")
         is_preorder = self.request.query_params.get("is_preorder")
-        stock_status = self.request.query_params.get("stock_status")
         search = self.request.query_params.get("search")
 
         if category:
@@ -157,22 +127,6 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
              queryset = queryset.filter(
                  is_preorder=is_preorder.lower() == "true"
             )    
-
-        if stock_status == "in_stock":
-            queryset = queryset.filter(
-                stock_quantity__gt=10
-            )
-
-        elif stock_status == "low_stock":
-            queryset = queryset.filter(
-                stock_quantity__gt=0,
-                stock_quantity__lte=10
-            )
-
-        elif stock_status == "out_of_stock":
-            queryset = queryset.filter(
-                stock_quantity=0
-            )
 
         if search:
             from django.db.models import Q
