@@ -141,6 +141,13 @@ class Order(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["payment_status"]),
+            models.Index(fields=["payment_status", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
 
     def save(self, *args, **kwargs):
         from django.utils import timezone
