@@ -430,20 +430,18 @@ def create_brevo_html_campaign(
         list_ids=list_ids,
     )
 
-
 def upload_brevo_campaign_image(
     image_url,
     image_name,
 ):
-    # Make sure Brevo receives a URL with a recognizable
-    # image extension.
     clean_url = image_url.split("?", 1)[0]
 
     extension = ""
 
-    if "." in clean_url:
+    # Get the image format from the original uploaded filename.
+    if image_name and "." in image_name:
         extension = (
-            clean_url.rsplit(".", 1)[1]
+            image_name.rsplit(".", 1)[1]
             .lower()
         )
 
@@ -453,22 +451,22 @@ def upload_brevo_campaign_image(
         "png": "png",
         "gif": "gif",
         "bmp": "bmp",
+        "webp": "webp",
     }
 
-    # If Cloudinary's URL does not contain an extension,
-    # use the extension from the original filename.
-    if extension not in allowed_extensions:
-        original_extension = ""
+    extension = allowed_extensions.get(
+        extension
+    )
 
-        if "." in image_name:
-            original_extension = (
-                image_name
-                .rsplit(".", 1)[1]
-                .lower()
-            )
+    # Fallback: try the Cloudinary URL.
+    if not extension and "." in clean_url:
+        url_extension = (
+            clean_url.rsplit(".", 1)[1]
+            .lower()
+        )
 
         extension = allowed_extensions.get(
-            original_extension
+            url_extension
         )
 
     if not extension:
@@ -477,12 +475,15 @@ def upload_brevo_campaign_image(
             "for the newsletter image."
         )
 
-    # Make sure the filename sent to Brevo has the
-    # correct image extension.
-    base_name = image_name.rsplit(
-        ".",
-        1,
-    )[0]
+    # Make sure Brevo receives a filename with
+    # a valid image extension.
+    if image_name and "." in image_name:
+        base_name = image_name.rsplit(
+            ".",
+            1,
+        )[0]
+    else:
+        base_name = "newsletter-image"
 
     brevo_image_name = (
         f"{base_name}.{extension}"
@@ -505,6 +506,7 @@ def upload_brevo_campaign_image(
         )
 
     return hosted_url
+
 
 def update_brevo_campaign_recipients(
     campaign_id,

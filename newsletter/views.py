@@ -2285,7 +2285,6 @@ class NewsletterCampaignSendDraftView(
 # =========================================================
 # IMAGE UPLOAD
 # =========================================================
-
 class NewsletterImageUploadView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -2338,10 +2337,14 @@ class NewsletterImageUploadView(APIView):
             )
 
         try:
-            # Save the image using the configured
-            # default storage (Cloudinary).
+            # Keep the original filename and extension.
+            original_name = os.path.basename(
+                image.name
+            )
+
+            # Save the image to Cloudinary.
             filename = default_storage.save(
-                f"newsletter/{image.name}",
+                f"newsletter/{original_name}",
                 image,
             )
 
@@ -2356,19 +2359,13 @@ class NewsletterImageUploadView(APIView):
                     "a public URL."
                 )
 
-            # Cloudinary image URLs do not necessarily contain
-            # a file extension, even when the uploaded asset is
-            # a valid image. The uploaded file was already
-            # validated by its original filename extension above,
-            # so do not reject the storage URL based on its suffix.
-
-            # Import the Cloudinary image into Brevo.
+            # Cloudinary URLs may not contain an extension.
+            # Pass the ORIGINAL filename to Brevo so Brevo
+            # knows whether the image is JPG, PNG, WEBP, etc.
             brevo_image_url = (
                 upload_brevo_campaign_image(
                     image_url,
-                    os.path.basename(
-                        filename
-                    ),
+                    original_name,
                 )
             )
 
