@@ -2282,7 +2282,6 @@ class NewsletterCampaignSendDraftView(
             )
 
 
-
 # =========================================================
 # IMAGE UPLOAD
 # =========================================================
@@ -2357,28 +2356,11 @@ class NewsletterImageUploadView(APIView):
                     "a public URL."
                 )
 
-            # Brevo needs a publicly accessible image
-            # URL with a recognizable image extension.
-            image_url_lower = (
-                image_url
-                .lower()
-                .split("?", 1)[0]
-            )
-
-            stored_extension = os.path.splitext(
-                image_url_lower
-            )[1]
-
-            if (
-                stored_extension
-                not in self.ALLOWED_IMAGE_EXTENSIONS
-            ):
-                raise RuntimeError(
-                    "Uploaded image URL does not "
-                    "contain a valid image format. "
-                    f"URL returned by storage: "
-                    f"{image_url}"
-                )
+            # Cloudinary image URLs do not necessarily contain
+            # a file extension, even when the uploaded asset is
+            # a valid image. The uploaded file was already
+            # validated by its original filename extension above,
+            # so do not reject the storage URL based on its suffix.
 
             # Import the Cloudinary image into Brevo.
             brevo_image_url = (
