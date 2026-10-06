@@ -334,19 +334,19 @@ def send_orentemist_email(
                 text-decoration:none;
             "
         >
-            lanrelegend@gmail.com
+            rofiatlawal676@gmail.com
         </a>
 
         <br>
 
         <a
-            href="tel:09153242202"
+            href="tel:09032452717"
             style="
                 color:#999999;
                 text-decoration:none;
             "
         >
-            09153242202
+            09032452717
         </a>
 
     </div>
@@ -359,7 +359,7 @@ def send_orentemist_email(
     ">
 
         <a
-            href="https://instagram.com/lanre_legend"
+            href="https://www.tiktok.com/@orentemist?_r=1&_t=ZS-9AJkwTuKJaz"
             style="
                 display:inline-block;
                 margin:0 8px;
@@ -381,7 +381,7 @@ def send_orentemist_email(
         </span>
 
         <a
-            href="https://tiktok.com/@lanre_legend"
+            href="https://www.tiktok.com/@orentemist?_r=1&_t=ZS-9AJkwTuKJaz"
             style="
                 display:inline-block;
                 margin:0 8px;
@@ -428,7 +428,7 @@ def send_orentemist_email(
         font-size:10px;
         line-height:1.7;
     ">
-        22 Oyun, Ilorin, Kwara State, Nigeria
+        Shop 3 jubilee complex tanke junction adjacent GTB, Ilorin, Kwara State, Nigeria
     </p>
 
 
@@ -475,11 +475,11 @@ def send_orentemist_email(
         f"{expiry_text}\n\n"
         f"{footer}\n\n"
         "ORENTEMIST\n"
-        "22 Oyun, Ilorin, Kwara State, Nigeria\n"
-        "Phone: 09153242202\n"
-        "Email: lanrelegend@gmail.com\n"
-        "Instagram: @lanre_legend\n"
-        "TikTok: @lanre_legend\n"
+        "Shop 3 jubilee complex tanke junction adjacent GTB, Ilorin, Kwara State, Nigeria\n"
+        "Phone: 09032452717\n"
+        "Email: rofiatlawal676@gmail.com\n"
+        "Instagram: @orentemist\n"
+        "TikTok: @orentemist\n"
         "Website: https://orentemist.online\n"
     )
 
@@ -1195,17 +1195,17 @@ def send_verification_link_email(user):
                             <br>
                             Crafted for those who leave an impression.
                             <br><br>
-                            22 Oyun, Ilorin, Kwara State, Nigeria
+                            Shop 3 jubilee complex tanke junction adjacent GTB, Ilorin, Kwara State, Nigeria
                             <br>
-                            09153242202
+                            09032452717
                             <br>
-                            lanrelegend@gmail.com
+                            rofiatlawal676@gmail.com
                             <br><br>
                             Instagram:
-                            @lanre_legend
+                            @orentemist
                             <br>
                             TikTok:
-                            @lanre_legend
+                            @orentemist
                             <br><br>
                             <a
                                 href="https://orentemist.online"
