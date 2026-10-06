@@ -31,8 +31,8 @@ class ProductDetailTests(APITestCase):
 
 
 class ProductListTests(APITestCase):
-    def test_product_list_returns_products_beyond_the_default_page_size(self):
-        for index in range(13):
+    def test_product_list_returns_first_24_products_with_full_count(self):
+        for index in range(30):
             Product.objects.create(
                 name=f"Fragrance {index}",
                 brand="ORENTEMIST",
@@ -43,8 +43,37 @@ class ProductListTests(APITestCase):
         response = self.client.get("/api/products/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsInstance(response.data, list)
-        self.assertEqual(len(response.data), 13)
+        self.assertEqual(response.data["count"], 30)
+        self.assertEqual(len(response.data["results"]), 24)
+        self.assertIsNotNone(response.data["next"])
+
+    def test_product_search_applies_before_pagination(self):
+        for index in range(30):
+            Product.objects.create(
+                name=f"Amber Fragrance {index}",
+                brand="ORENTEMIST",
+                description="A test fragrance.",
+                price="25000.00",
+            )
+
+        Product.objects.create(
+            name="Hidden Dior Fragrance",
+            brand="Dior",
+            description="A matching fragrance beyond the first page.",
+            price="25000.00",
+        )
+
+        response = self.client.get(
+            "/api/products/",
+            {"search": "Dior"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(
+            response.data["results"][0]["name"],
+            "Hidden Dior Fragrance",
+        )
 
 
 class ProductBulkImportTests(APITestCase):

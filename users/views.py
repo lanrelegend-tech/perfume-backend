@@ -29,6 +29,7 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
@@ -1796,6 +1797,21 @@ class AdminCustomerListView(generics.ListAPIView):
 
     serializer_class = AdminCustomerSerializer
     permission_classes = [IsAdminUser]
+    filterset_fields = [
+        "is_active",
+    ]
+    search_fields = [
+        "username",
+        "email",
+        "first_name",
+        "last_name",
+    ]
+    ordering_fields = [
+        "date_joined",
+        "email",
+        "first_name",
+        "last_name",
+    ]
 
     def get_queryset(self):
 
@@ -1806,35 +1822,6 @@ class AdminCustomerListView(generics.ListAPIView):
             .prefetch_related("orders")
             .order_by("-date_joined")
         )
-
-        search = self.request.query_params.get(
-            "search"
-        )
-
-        if search:
-
-            queryset = queryset.filter(
-                Q(username__icontains=search)
-                | Q(email__icontains=search)
-                | Q(first_name__icontains=search)
-                | Q(last_name__icontains=search)
-            )
-
-        is_active = self.request.query_params.get(
-            "is_active"
-        )
-
-        if is_active == "true":
-
-            queryset = queryset.filter(
-                is_active=True
-            )
-
-        elif is_active == "false":
-
-            queryset = queryset.filter(
-                is_active=False
-            )
 
         return queryset
 
@@ -2013,6 +2000,8 @@ class AdminGuestCustomerListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        search = request.query_params.get("search")
+        is_active = request.query_params.get("is_active")
 
         guests = (
             Order.objects
@@ -2031,6 +2020,14 @@ class AdminGuestCustomerListView(APIView):
             )
             .order_by("-order_count")
         )
+
+        if search:
+            guests = guests.filter(
+                email__icontains=search
+            )
+
+        if is_active == "false":
+            guests = guests.none()
 
         results = []
 
@@ -2082,15 +2079,15 @@ class AdminGuestCustomerListView(APIView):
                 }
             )
 
-        return Response(
-            {
-                "count":
-                    len(results),
-
-                "results":
-                    results,
-            }
+        paginator = PageNumberPagination()
+        paginator.page_size = 24
+        page = paginator.paginate_queryset(
+            results,
+            request,
+            view=self,
         )
+
+        return paginator.get_paginated_response(page)
 
 # =========================================================
 # LOGOUT

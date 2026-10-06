@@ -74,6 +74,17 @@ class ReviewDetailView(generics.RetrieveUpdateDestroyAPIView):
 class AdminReviewListView(generics.ListAPIView):
     serializer_class = ReviewSerializer
     permission_classes = [IsAdminUser]
+    search_fields = [
+        "comment",
+        "user__username",
+        "user__email",
+        "product__name",
+        "product__brand",
+    ]
+    ordering_fields = [
+        "created_at",
+        "rating",
+    ]
 
     def get_queryset(self):
         return Review.objects.all().select_related(

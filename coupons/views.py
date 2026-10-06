@@ -118,9 +118,48 @@ class ValidateCouponView(APIView):
         })
 
 class AdminCouponListCreateView(generics.ListCreateAPIView):
-    queryset = Coupon.objects.all().order_by("-created_at")
     serializer_class = CouponSerializer
     permission_classes = [IsAdminUser]
+    filterset_fields = [
+        "is_active",
+        "discount_type",
+    ]
+    search_fields = [
+        "code",
+    ]
+    ordering_fields = [
+        "created_at",
+        "expires_at",
+        "used_count",
+        "discount_value",
+    ]
+
+    def get_queryset(self):
+        queryset = Coupon.objects.all().order_by("-created_at")
+        coupon_status = self.request.query_params.get("status")
+        now = timezone.now()
+
+        if coupon_status == "active":
+            queryset = queryset.filter(
+                is_active=True,
+            ).filter(
+                expires_at__isnull=True
+            ) | queryset.filter(
+                is_active=True,
+                expires_at__gt=now,
+            )
+
+        elif coupon_status == "inactive":
+            queryset = queryset.filter(
+                is_active=False,
+            )
+
+        elif coupon_status == "expired":
+            queryset = queryset.filter(
+                expires_at__lt=now,
+            )
+
+        return queryset.order_by("-created_at")
 
 
 class AdminCouponDetailView(generics.RetrieveUpdateDestroyAPIView):

@@ -50,6 +50,26 @@ class AdminDashboardView(APIView):
 class AdminOrderListView(generics.ListAPIView):
     serializer_class = AdminOrderSerializer
     permission_classes = [IsAdminUser]
+    filterset_fields = [
+        "status",
+        "payment_status",
+        "delivery_method",
+    ]
+    search_fields = [
+        "order_number",
+        "full_name",
+        "email",
+        "phone",
+        "city",
+        "state",
+        "items__product_name",
+        "items__product_brand",
+    ]
+    ordering_fields = [
+        "created_at",
+        "total_amount",
+        "updated_at",
+    ]
 
     def get_queryset(self):
         return (
@@ -2487,6 +2507,20 @@ class AdminRefundListView(
 
     serializer_class = RefundSerializer
     permission_classes = [IsAdminUser]
+    filterset_fields = [
+        "status",
+    ]
+    search_fields = [
+        "order__order_number",
+        "order__full_name",
+        "order__email",
+        "reason",
+    ]
+    ordering_fields = [
+        "created_at",
+        "amount",
+        "updated_at",
+    ]
 
     def get_queryset(self):
 
@@ -2499,18 +2533,6 @@ class AdminRefundListView(
             .all()
             .order_by("-created_at")
         )
-
-        status_filter = (
-            self.request.query_params.get(
-                "status"
-            )
-        )
-
-        if status_filter:
-
-            queryset = queryset.filter(
-                status=status_filter
-            )
 
         return queryset
 

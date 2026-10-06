@@ -10,6 +10,17 @@ from .serializers import NotificationSerializer
 class NotificationListView(generics.ListAPIView):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    filterset_fields = [
+        "is_read",
+        "notification_type",
+    ]
+    search_fields = [
+        "title",
+        "message",
+    ]
+    ordering_fields = [
+        "created_at",
+    ]
 
     def get_queryset(self):
         return Notification.objects.filter(
