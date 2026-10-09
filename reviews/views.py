@@ -1,5 +1,6 @@
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import generics
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import (
     IsAuthenticatedOrReadOnly,
@@ -14,9 +15,15 @@ from orders.models import OrderItem
 class ReviewCreateThrottle(UserRateThrottle):
     rate = "3/hour"
 
+
+class ProductReviewPagination(PageNumberPagination):
+    page_size = 2
+
+
 class ProductReviewListView(generics.ListAPIView):
     serializer_class = ReviewSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = ProductReviewPagination
 
     def get_queryset(self):
         product_id = self.kwargs["product_id"]
