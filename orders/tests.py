@@ -93,3 +93,32 @@ class CheckoutTests(APITestCase):
         order = Order.objects.get(pk=response.data["order"]["id"])
         self.assertEqual(order.discount_amount, Decimal("2500.00"))
         self.assertEqual(order.total_amount, Decimal("25000.00"))
+
+    def test_pickup_order_response_includes_pickup_address(self):
+        pickup_address = "ORENTEMIST Studio, Lekki Phase 1"
+        ShippingRate.objects.create(
+            delivery_type="pickup",
+            delivery_fee=Decimal("0.00"),
+            pickup_address=pickup_address,
+        )
+        payload = {
+            **self.payload,
+            "customer": {
+                **self.payload["customer"],
+                "address": "",
+                "city": "",
+                "state": "",
+            },
+            "delivery_method": "pickup",
+        }
+
+        response = self.client.post(
+            "/api/orders/create/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order_data = response.data["order"]
+        self.assertEqual(order_data["delivery_method"], "pickup")
+        self.assertEqual(order_data["pickup_address"], pickup_address)
