@@ -539,6 +539,17 @@ class CookieTokenObtainPairView(APIView):
             raise_exception=True
         )
 
+        user = getattr(
+            serializer,
+            "user",
+            None,
+        )
+
+        if user:
+            claim_guest_orders_for_user(
+                user
+            )
+
         tokens = serializer.validated_data
 
         access_token = tokens["access"]
@@ -858,6 +869,32 @@ def claim_guest_orders_for_user(user):
     return updated_count
 
 
+def claim_guest_orders_for_verified_users():
+    """
+    Keep admin customer views in sync by attaching guest
+    orders to verified customer accounts with matching emails.
+    """
+
+    claimed_count = 0
+
+    users = (
+        User.objects
+        .filter(
+            email_verification__verified_at__isnull=False,
+        )
+        .exclude(email__isnull=True)
+        .exclude(email="")
+        .order_by("id")
+    )
+
+    for user in users.iterator():
+        claimed_count += claim_guest_orders_for_user(
+            user
+        )
+
+    return claimed_count
+
+
 @method_decorator(
     ratelimit(
         key="ip",
@@ -927,6 +964,10 @@ class VerifyEmailView(APIView):
             )
 
         if verification.verified_at:
+
+            claim_guest_orders_for_user(
+                user
+            )
 
             return Response(
                 {
@@ -1286,6 +1327,10 @@ class VerifyEmailLinkView(APIView):
         user = verification.user
 
         if verification.verified_at:
+            claim_guest_orders_for_user(
+                user
+            )
+
             return Response(
                 {
                     "message":
@@ -1815,6 +1860,8 @@ class AdminCustomerListView(generics.ListAPIView):
 
     def get_queryset(self):
 
+        claim_guest_orders_for_verified_users()
+
         queryset = (
             User.objects
             .filter(is_staff=False)
@@ -1838,6 +1885,8 @@ class AdminCustomerDetailView(
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
+
+        claim_guest_orders_for_verified_users()
 
         return (
             User.objects
@@ -2000,6 +2049,8 @@ class AdminGuestCustomerListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        claim_guest_orders_for_verified_users()
+
         search = request.query_params.get("search")
         is_active = request.query_params.get("is_active")
 

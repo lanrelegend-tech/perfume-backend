@@ -296,6 +296,8 @@ class AdminOrderDetailView(
                         order=order,
                         status__in=[
                             "pending",
+                            "processing",
+                            "needs_attention",
                             "processed",
                         ],
                     )
@@ -404,33 +406,45 @@ class AdminOrderDetailView(
                     {},
                 )
 
-                refund.status = "processed"
-
-                refund.paystack_reference = (
-                    refund_data.get(
-                        "transaction_reference"
+                refund_status = (
+                    _normalize_paystack_refund_status(
+                        refund_data.get("status")
                     )
-                    or refund_data.get(
-                        "reference"
-                    )
-                    or order.payment_reference
                 )
 
-                refund.save(
-                    update_fields=[
-                        "status",
-                        "paystack_reference",
-                        "updated_at",
-                    ]
+                if refund_status == "failed":
+                    _apply_refund_status(
+                        order=order,
+                        refund=refund,
+                        refund_status="failed",
+                        paystack_reference=(
+                            _get_paystack_refund_reference(
+                                refund_data,
+                                order,
+                            )
+                        ),
+                        cancel_order=False,
+                    )
+
+                    raise ValidationError({
+                        "status": (
+                            "Refund request failed. "
+                            "The order was not cancelled."
+                        )
+                    })
+
+                _apply_refund_status(
+                    order=order,
+                    refund=refund,
+                    refund_status=refund_status,
+                    paystack_reference=(
+                        _get_paystack_refund_reference(
+                            refund_data,
+                            order,
+                        )
+                    ),
+                    cancel_order=True,
                 )
-
-                # -------------------------------------------------
-                # RESTORE INVENTORY
-                # -------------------------------------------------
-
-                _restore_order_inventory_and_coupon(order)
-
-                order.payment_status = "refunded"
 
             # -------------------------------------------------
             # CANCEL ORDER
@@ -455,32 +469,25 @@ class AdminOrderDetailView(
                     + (
                         " and payment refunded"
                         if order.payment_status == "refunded"
-                        else ""
+                        else (
+                            " and refund requested"
+                            if order.payment_status in [
+                                "refund_pending",
+                                "refund_processing",
+                            ]
+                            else ""
+                        )
                     )
                 ),
             )
 
-            if refund:
-
-                def send_refund_email_after_commit():
-                    try:
-                        from .email import (
-                            send_order_refund_email
-                        )
-
-                        send_order_refund_email(
-                            order,
-                            refund,
-                        )
-
-                    except Exception as exc:
-                        print(
-                            "REFUND EMAIL ERROR:",
-                            repr(exc),
-                        )
-
-                transaction.on_commit(
-                    send_refund_email_after_commit
+            if (
+                refund
+                and refund.status == "processed"
+            ):
+                _send_refund_email_on_commit(
+                    order,
+                    refund,
                 )
 
             return
@@ -786,6 +793,229 @@ def _restore_order_inventory_and_coupon(order):
             coupon.used_by.remove(
                 order.user
             )
+
+
+PAYSTACK_REFUND_STATUS_MAP = {
+    "pending": "pending",
+    "processing": "processing",
+    "needs-attention": "needs_attention",
+    "needs_attention": "needs_attention",
+    "processed": "processed",
+    "failed": "failed",
+}
+
+ORDER_PAYMENT_STATUS_BY_REFUND_STATUS = {
+    "pending": "refund_pending",
+    "processing": "refund_processing",
+    "needs_attention": "refund_pending",
+    "processed": "refunded",
+    "failed": "refund_failed",
+}
+
+
+def _normalize_paystack_refund_status(value):
+    normalized = str(value or "").strip().lower()
+
+    return PAYSTACK_REFUND_STATUS_MAP.get(
+        normalized,
+        "pending",
+    )
+
+
+def _get_paystack_refund_reference(refund_data, order):
+    reference = (
+        refund_data.get("refund_reference")
+        or refund_data.get("reference")
+        or refund_data.get("id")
+        or refund_data.get("transaction_reference")
+        or order.payment_reference
+    )
+
+    return str(reference) if reference else None
+
+
+def _apply_refund_status(
+    *,
+    order,
+    refund,
+    refund_status,
+    paystack_reference=None,
+    cancel_order=True,
+):
+    old_refund_status = refund.status
+    old_payment_status = order.payment_status
+
+    refund.status = refund_status
+
+    if paystack_reference:
+        refund.paystack_reference = paystack_reference
+
+    refund.save(
+        update_fields=[
+            "status",
+            "paystack_reference",
+            "updated_at",
+        ]
+    )
+
+    order.payment_status = (
+        ORDER_PAYMENT_STATUS_BY_REFUND_STATUS[
+            refund_status
+        ]
+    )
+
+    if cancel_order:
+        order.status = "cancelled"
+
+    if (
+        refund_status == "processed"
+        and old_payment_status != "refunded"
+    ):
+        _restore_order_inventory_and_coupon(order)
+
+    order.save(
+        update_fields=[
+            "payment_status",
+            "status",
+            "updated_at",
+        ]
+    )
+
+    return old_refund_status != refund_status
+
+
+def _find_refund_for_paystack_event(refund_data):
+    refund_reference = (
+        refund_data.get("refund_reference")
+        or refund_data.get("reference")
+        or refund_data.get("id")
+    )
+
+    transaction_reference = (
+        refund_data.get("transaction_reference")
+        or refund_data.get("transaction", {}).get("reference")
+        if isinstance(
+            refund_data.get("transaction"),
+            dict,
+        )
+        else refund_data.get("transaction_reference")
+    )
+
+    queryset = (
+        Refund.objects
+        .select_for_update()
+        .select_related("order", "order__coupon")
+        .prefetch_related("order__items")
+    )
+
+    if refund_reference:
+        refund = (
+            queryset
+            .filter(
+                paystack_reference=str(refund_reference)
+            )
+            .first()
+        )
+
+        if refund:
+            return refund
+
+    if transaction_reference:
+        return (
+            queryset
+            .filter(
+                order__payment_reference=str(
+                    transaction_reference
+                ),
+                status__in=[
+                    "pending",
+                    "processing",
+                    "needs_attention",
+                ],
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+    return None
+
+
+def _send_refund_email_on_commit(order, refund):
+    def send_refund_email_after_commit():
+        try:
+            from .email import send_order_refund_email
+
+            send_order_refund_email(
+                order,
+                refund,
+            )
+
+        except Exception as exc:
+            print(
+                "REFUND EMAIL ERROR:",
+                repr(exc),
+            )
+
+    transaction.on_commit(
+        send_refund_email_after_commit
+    )
+
+
+def _process_paystack_refund_event(payload):
+    refund_data = payload.get("data") or {}
+    refund = _find_refund_for_paystack_event(
+        refund_data
+    )
+
+    if not refund:
+        return (
+            {
+                "message": (
+                    "Refund event ignored; matching refund "
+                    "was not found."
+                )
+            },
+            status.HTTP_200_OK,
+        )
+
+    order = refund.order
+    refund_status = _normalize_paystack_refund_status(
+        refund_data.get("status")
+    )
+
+    paystack_reference = _get_paystack_refund_reference(
+        refund_data,
+        order,
+    )
+
+    status_changed = _apply_refund_status(
+        order=order,
+        refund=refund,
+        refund_status=refund_status,
+        paystack_reference=paystack_reference,
+        cancel_order=True,
+    )
+
+    if (
+        status_changed
+        and refund_status == "processed"
+    ):
+        _send_refund_email_on_commit(
+            order,
+            refund,
+        )
+
+    return (
+        {
+            "message": (
+                "Refund webhook processed successfully."
+            ),
+            "refund_id": refund.id,
+            "refund_status": refund.status,
+            "payment_status": order.payment_status,
+        },
+        status.HTTP_200_OK,
+    )
 
 
 
@@ -2239,7 +2469,10 @@ class AdminRefundPaymentView(APIView):
         # ONLY PAID ORDERS
         # -------------------------------------------------
 
-        if order.payment_status != "paid":
+        if order.payment_status not in [
+            "paid",
+            "refund_failed",
+        ]:
 
             return Response(
                 {
@@ -2275,6 +2508,8 @@ class AdminRefundPaymentView(APIView):
                 order=order,
                 status__in=[
                     "pending",
+                    "processing",
+                    "needs_attention",
                     "processed",
                 ],
             )
@@ -2416,47 +2651,46 @@ class AdminRefundPaymentView(APIView):
             {}
         )
 
-        refund.status = "processed"
+        refund_status = _normalize_paystack_refund_status(
+            refund_data.get("status")
+        )
 
-        refund.paystack_reference = (
-            refund_data.get(
-                "transaction_reference"
+        paystack_reference = (
+            _get_paystack_refund_reference(
+                refund_data,
+                order,
             )
-            or refund_data.get(
-                "reference"
+        )
+
+        if refund_status == "failed":
+            _apply_refund_status(
+                order=order,
+                refund=refund,
+                refund_status="failed",
+                paystack_reference=paystack_reference,
+                cancel_order=False,
             )
-            or order.payment_reference
-        )
 
-        refund.save(
-            update_fields=[
-                "status",
-                "paystack_reference",
-                "updated_at",
-            ]
-        )
-
-        # -------------------------------------------------
-        # RESTORE STOCK + COUPON
-        # -------------------------------------------------
-
-        _restore_order_inventory_and_coupon(
-            order
-        )
+            return Response(
+                {
+                    "error": "Refund request failed.",
+                    "refund_id": refund.id,
+                    "refund_status": refund.status,
+                    "payment_status": order.payment_status,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # -------------------------------------------------
-        # UPDATE ORDER
+        # UPDATE REFUND + ORDER STATUS
         # -------------------------------------------------
 
-        order.payment_status = "refunded"
-        order.status = "cancelled"
-
-        order.save(
-            update_fields=[
-                "payment_status",
-                "status",
-                "updated_at",
-            ]
+        _apply_refund_status(
+            order=order,
+            refund=refund,
+            refund_status=refund_status,
+            paystack_reference=paystack_reference,
+            cancel_order=True,
         )
 
         # -------------------------------------------------
@@ -2467,39 +2701,31 @@ class AdminRefundPaymentView(APIView):
             order=order,
             status="cancelled",
             changed_by=request.user,
-            note="Payment refunded by admin.",
+            note=(
+                "Payment refunded by admin."
+                if order.payment_status == "refunded"
+                else "Refund requested by admin."
+            ),
         )
 
         # -------------------------------------------------
         # REFUND EMAIL
         # -------------------------------------------------
 
-        def send_refund_email_after_commit():
-            try:
-                from .email import send_order_refund_email
-
-                send_order_refund_email(
-                    order,
-                    refund,
-                )
-
-            except Exception as exc:
-                print(
-                    "REFUND EMAIL ERROR:",
-                    repr(exc),
-                )
-
-            
-
-        transaction.on_commit(
-            send_refund_email_after_commit
-        )
+        if refund.status == "processed":
+            _send_refund_email_on_commit(
+                order,
+                refund,
+            )
 
         return Response({
             "message": (
                 "Payment refunded successfully."
+                if refund.status == "processed"
+                else "Refund request submitted successfully."
             ),
             "refund_id": refund.id,
+            "refund_status": refund.status,
             "order_id": order.id,
             "payment_status": order.payment_status,
             "status": order.status,
@@ -2634,6 +2860,18 @@ class PaystackWebhookView(APIView):
         event = payload.get(
             "event"
         )
+
+        if str(event or "").startswith("refund."):
+            response_data, response_status = (
+                _process_paystack_refund_event(
+                    payload
+                )
+            )
+
+            return Response(
+                response_data,
+                status=response_status,
+            )
 
         # -------------------------------------------------
         # ONLY PROCESS SUCCESSFUL CHARGES

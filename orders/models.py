@@ -18,6 +18,9 @@ class Order(models.Model):
         ("pending", "Pending"),
         ("paid", "Paid"),
         ("failed", "Failed"),
+        ("refund_pending", "Refund Pending"),
+        ("refund_processing", "Refund Processing"),
+        ("refund_failed", "Refund Failed"),
         ("refunded", "Refunded"),
     ]
     user = models.ForeignKey(
@@ -142,11 +145,26 @@ class Order(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["created_at"]),
-            models.Index(fields=["status"]),
-            models.Index(fields=["payment_status"]),
-            models.Index(fields=["payment_status", "created_at"]),
-            models.Index(fields=["status", "created_at"]),
+            models.Index(
+                fields=["created_at"],
+                name="orders_orde_created_6cf3b9_idx",
+            ),
+            models.Index(
+                fields=["status"],
+                name="orders_orde_status_fdebb8_idx",
+            ),
+            models.Index(
+                fields=["payment_status"],
+                name="orders_orde_payment_43ab57_idx",
+            ),
+            models.Index(
+                fields=["payment_status", "created_at"],
+                name="orders_orde_payment_f66a45_idx",
+            ),
+            models.Index(
+                fields=["status", "created_at"],
+                name="orders_orde_status_22441f_idx",
+            ),
         ]
 
     def save(self, *args, **kwargs):
@@ -242,6 +260,8 @@ class OrderItem(models.Model):
 class Refund(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
+        ("processing", "Processing"),
+        ("needs_attention", "Needs Attention"),
         ("processed", "Processed"),
         ("failed", "Failed"),
     ]

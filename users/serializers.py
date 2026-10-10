@@ -66,6 +66,8 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
                 ),
             })
 
+        self.user = user
+
         refresh = self.get_token(user)
 
         return {
