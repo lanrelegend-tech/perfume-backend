@@ -3,7 +3,6 @@ from rest_framework.exceptions import ValidationError
 from django.conf import settings
 
 from .bulk_importer import import_products
-from .cache_utils import purge_products_cache
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAdminUser
 from django.db.models import Avg, Count
@@ -207,7 +206,6 @@ class AdminProductListCreateView(generics.ListCreateAPIView):
         return queryset
     def perform_create(self, serializer):
         serializer.save()
-        purge_products_cache()
 
 class AdminProductDetailView(
     generics.RetrieveUpdateDestroyAPIView
@@ -217,7 +215,6 @@ class AdminProductDetailView(
     permission_classes = [IsAdminUser]
     def perform_update(self, serializer):
         serializer.save()
-        purge_products_cache()    
     def perform_destroy(self, instance):
         # Collect unique image names first because Product.image
         # and the primary ProductImage can point to the same
@@ -237,7 +234,6 @@ class AdminProductDetailView(
 
         # Finally delete the product and its related database records.
         instance.delete()  
-        purge_products_cache()  
 
     
         
@@ -247,7 +243,6 @@ class AdminCategoryListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAdminUser]
     def perform_create(self, serializer):
         serializer.save()
-        purge_products_cache()    
 
 
 class AdminCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -256,11 +251,9 @@ class AdminCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdminUser]   
     def perform_update(self, serializer):
         serializer.save()
-        purge_products_cache()
 
     def perform_destroy(self, instance):
         instance.delete()
-        purge_products_cache()    
 class AdminInventoryView(generics.ListAPIView):
     serializer_class = AdminInventorySerializer
     permission_classes = [IsAdminUser]
@@ -299,7 +292,6 @@ class AdminProductVariantListCreateView(
     permission_classes = [IsAdminUser]
     def perform_create(self, serializer):
         serializer.save()
-        purge_products_cache()    
 
     def get_queryset(self):
         queryset = ProductVariant.objects.all().select_related(
@@ -324,11 +316,9 @@ class AdminProductVariantDetailView(
     permission_classes = [IsAdminUser] 
     def perform_update(self, serializer):
         serializer.save()
-        purge_products_cache()
 
     def perform_destroy(self, instance):
         instance.delete()
-        purge_products_cache()      
 
 class AdminProductImageListCreateView(generics.ListCreateAPIView):
     queryset = ProductImage.objects.select_related("product").all()
@@ -353,7 +343,6 @@ class AdminProductImageListCreateView(generics.ListCreateAPIView):
             ).update(is_primary=False)
 
         serializer.save()
-        purge_products_cache()
 class AdminProductImageDetailView(
     generics.RetrieveDestroyAPIView
 ):
@@ -384,7 +373,6 @@ class AdminProductImageDetailView(
                 "updated_at",
             ]
         )
-        purge_products_cache()
 
         serializer = self.get_serializer(instance)
 
@@ -451,7 +439,6 @@ class AdminProductImageDetailView(
                         "updated_at",
                     ]
                 )   
-            purge_products_cache()
 class AdminProductBulkImageUploadView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -527,8 +514,6 @@ class AdminProductBulkImageUploadView(APIView):
                     "updated_at",
                 ]
             )
-
-        purge_products_cache()
 
         serializer = AdminProductImageSerializer(
             created_images,

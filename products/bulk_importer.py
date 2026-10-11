@@ -13,7 +13,6 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from .models import Category, Product, ProductImage
-from .cache_utils import purge_products_cache
 
 
 MAX_ROWS = 1000
@@ -607,12 +606,6 @@ def import_products(request):
 
         if zip_file:
             zip_file.close()
-
-    # Product API is cached through Cloudflare.
-    # Purge once after the entire import instead of
-    # purging after every single product/image.
-    if success_count:
-        purge_products_cache()
 
     if success_count == 0 and failure_count > 0:
        return Response(
