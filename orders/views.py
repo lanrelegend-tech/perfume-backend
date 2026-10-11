@@ -904,7 +904,7 @@ def _find_refund_for_paystack_event(refund_data):
     queryset = (
         Refund.objects
         .select_for_update()
-        .select_related("order", "order__coupon")
+        .select_related("order")
         .prefetch_related("order__items")
     )
 
