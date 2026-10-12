@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 
-from products.models import Product, ProductImage
+from products.models import Category, Product, ProductImage
 
 
 class ProductDetailTests(APITestCase):
@@ -84,6 +84,10 @@ class ProductBulkImportTests(APITestCase):
             password="password",
         )
         self.client.force_authenticate(self.admin)
+        self.category = Category.objects.create(
+            name="Perfume",
+            slug="perfume",
+        )
 
     @patch.object(
         ProductImage._meta.get_field("image").storage,
@@ -97,8 +101,8 @@ class ProductBulkImportTests(APITestCase):
         csv_file = SimpleUploadedFile(
             "products.csv",
             (
-                "name,brand,description,price,image\n"
-                "Test Fragrance,ORENTEMIST,A test fragrance.,25000,test.jpg\n"
+                "name,price,category,stock_quantity,image\n"
+                "Test Fragrance,25000,Perfume,10,test.jpg\n"
             ).encode(),
             content_type="text/csv",
         )
@@ -120,11 +124,38 @@ class ProductBulkImportTests(APITestCase):
         self.assertEqual(response.status_code, 201)
 
         product = Product.objects.get(name="Test Fragrance")
+        self.assertEqual(product.brand, "ORENTEMIST")
+        self.assertEqual(product.description, "")
+        self.assertEqual(product.category, self.category)
+        self.assertEqual(product.stock_quantity, 10)
         self.assertEqual(product.gender, "unisex")
         self.assertEqual(product.concentration, "")
         self.assertTrue(product.image.name.endswith("/test.jpg"))
         self.assertTrue(product.images.get().is_primary)
         mocked_save.assert_called_once()
+
+    def test_bulk_import_requires_essential_columns(self):
+        csv_file = SimpleUploadedFile(
+            "products.csv",
+            (
+                "name,price\n"
+                "Test Fragrance,25000\n"
+            ).encode(),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/products/admin/bulk-import/",
+            {
+                "csv_file": csv_file,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("category", response.data["error"])
+        self.assertIn("image", response.data["error"])
+        self.assertIn("stock_quantity", response.data["error"])
 
     def test_admin_image_upload_rejects_more_than_four_images(self):
         product = Product.objects.create(

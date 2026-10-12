@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import zipfile
 
 from datetime import datetime
@@ -30,10 +31,41 @@ ALLOWED_IMAGE_EXTENSIONS = {
 
 REQUIRED_FIELDS = {
     "name",
-    "brand",
-    "description",
     "price",
+    "category",
 }
+
+STOCK_FIELD_NAMES = (
+    "stock_quantity",
+    "stock",
+)
+
+IMAGE_FIELD_NAMES = (
+    "image_files",
+    "image",
+    "image_name",
+    "image_filename",
+)
+
+
+def get_first_row_value(row, field_names, default=""):
+    for field_name in field_names:
+        value = row.get(field_name)
+
+        if value not in (None, ""):
+            return value
+
+    return default
+
+
+def normalize_header(value):
+    return (
+        str(value or "")
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
 
 
 def parse_bool(value, default=False):
@@ -143,12 +175,24 @@ def import_products(request):
         )
 
     fieldnames = {
-        field.strip()
+        normalize_header(field)
         for field in reader.fieldnames
         if field
     }
 
     missing_fields = REQUIRED_FIELDS - fieldnames
+
+    if not any(
+        field_name in fieldnames
+        for field_name in STOCK_FIELD_NAMES
+    ):
+        missing_fields.add("stock_quantity")
+
+    if not any(
+        field_name in fieldnames
+        for field_name in IMAGE_FIELD_NAMES
+    ):
+        missing_fields.add("image")
 
     if missing_fields:
         return Response(
@@ -163,7 +207,13 @@ def import_products(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    rows = list(reader)
+    rows = [
+        {
+            normalize_header(key): value
+            for key, value in row.items()
+        }
+        for row in reader
+    ]
 
     if not rows:
         return Response(
@@ -308,7 +358,7 @@ def import_products(request):
 
                     brand = str(
                         row.get("brand", "")
-                    ).strip()
+                    ).strip() or "ORENTEMIST"
 
                     description = str(
                         row.get("description", "")
@@ -321,16 +371,6 @@ def import_products(request):
                     if not name:
                         raise ValueError(
                             "name is required."
-                        )
-
-                    if not brand:
-                        raise ValueError(
-                            "brand is required."
-                        )
-
-                    if not description:
-                        raise ValueError(
-                            "description is required."
                         )
 
                     if not price_value:
@@ -356,23 +396,36 @@ def import_products(request):
                             "price cannot be negative."
                         )
 
-                    category = find_category(
-                        row.get("category")
-                    )
+                    category_value = str(
+                        row.get("category", "")
+                    ).strip()
+
+                    if not category_value:
+                        raise ValueError(
+                            "category is required."
+                        )
+
+                    category = find_category(category_value)
 
                     # -------------------------------------------------
                     # Stock
                     # -------------------------------------------------
 
+                    stock_value = str(
+                        get_first_row_value(
+                            row,
+                            STOCK_FIELD_NAMES,
+                        )
+                    ).strip()
+
+                    if not stock_value:
+                        raise ValueError(
+                            "stock_quantity is required."
+                        )
+
                     try:
                         stock_quantity = int(
-                            str(
-                                row.get(
-                                    "stock_quantity",
-                                    "0"
-                                )
-                            ).strip()
-                            or "0"
+                            stock_value
                         )
 
                     except ValueError:
@@ -385,6 +438,52 @@ def import_products(request):
                         raise ValueError(
                             "stock_quantity cannot "
                             "be negative."
+                        )
+
+                    image_value = str(
+                        get_first_row_value(
+                            row,
+                            IMAGE_FIELD_NAMES,
+                        )
+                    ).strip()
+
+                    image_names = [
+                        item.strip()
+                        for item in re.split(r"[,;|]", image_value)
+                        if item.strip()
+                    ]
+
+                    if not image_names:
+                        raise ValueError(
+                            "image is required."
+                        )
+
+                    if len(image_names) > MAX_IMAGES_PER_PRODUCT:
+                        raise ValueError(
+                            "A product can have a maximum "
+                            "of 4 images."
+                        )
+
+                    missing_images = []
+
+                    for image_name in image_names:
+                        lookup_name = (
+                            os.path.basename(image_name)
+                            .strip()
+                            .lower()
+                        )
+
+                        if (
+                            lookup_name not in uploaded_image_files
+                            and lookup_name not in image_files
+                        ):
+                            missing_images.append(image_name)
+
+                    if missing_images:
+                        raise ValueError(
+                            "Image file(s) were not attached "
+                            "or found in ZIP: "
+                            + ", ".join(missing_images)
                         )
 
                     # -------------------------------------------------
@@ -465,33 +564,6 @@ def import_products(request):
                     # Images
                     # -------------------------------------------------
 
-                    image_value = str(
-                        row.get(
-                            "image_files",
-                            ""
-                        )
-                    ).strip()
-
-                    if not image_value:
-                        image_value = str(
-                            row.get(
-                                "image",
-                                ""
-                            )
-                        ).strip()
-
-                    image_names = [
-                        item.strip()
-                        for item in image_value.split("|")
-                        if item.strip()
-                    ]
-
-                    if len(image_names) > MAX_IMAGES_PER_PRODUCT:
-                        raise ValueError(
-                            "A product can have a maximum "
-                            "of 4 images."
-                        )
-
                     image_errors = []
                     has_primary_image = False
 
@@ -568,16 +640,9 @@ def import_products(request):
                                 f"failed: {exc}"
                             )
 
-                    # Image problems don't cancel the
-                    # entire product import.
                     if image_errors:
-                        errors.append(
-                            {
-                                "row": row_number,
-                                "type": "image",
-                                "product": product.name,
-                                "messages": image_errors,
-                            }
+                        raise ValueError(
+                            "; ".join(image_errors)
                         )
 
                     success_count += 1
