@@ -31,7 +31,7 @@ class Product(models.Model):
     brand = models.CharField(max_length=100)
     gender = models.CharField(max_length=20, choices=GENDER_CHOICES, default="unisex")
     concentration = models.CharField(max_length=20, choices=CONCENTRATION_CHOICES, blank=True)
-    description = models.TextField()
+    description = models.TextField(blank=True)
 
     category = models.ForeignKey(
         Category,
