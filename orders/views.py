@@ -3940,6 +3940,10 @@ class CreateOrderView(APIView):
             # CREATE ORDER
             # -------------------------------------------------
 
+            notes = str(
+                request.data.get("notes") or ""
+                ).strip()
+
             order = Order.objects.create(
                 user=user,
                 full_name=full_name,
@@ -3957,6 +3961,7 @@ class CreateOrderView(APIView):
                 coupon=coupon,
                 discount_amount=discount,
                 delivery_fee=delivery_fee,
+                notes=notes,
                 total_amount=total_amount,
                 payment_status="pending",
                 status="pending",
